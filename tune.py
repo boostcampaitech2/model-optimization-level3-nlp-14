@@ -29,11 +29,16 @@ def search_hyperparam(trial: optuna.trial.Trial) -> Dict[str, Any]:
     img_size = trial.suggest_categorical("img_size", [96, 112, 168, 224])
     n_select = trial.suggest_int("n_select", low=2, high=6, step=2)
     batch_size = trial.suggest_int("batch_size", low=16, high=32, step=16)
+    optimizer_name = trial.suggest_categorical("optimizer", ["Adam"])
+    lr = trial.suggest_float("lr", 1e-4, 1e-2,log=True)
+    
     return {
         "EPOCHS": epochs,
         "IMG_SIZE": img_size,
         "n_select": n_select,
         "BATCH_SIZE": batch_size,
+        "OPTIMIZER" : optimizer_name,
+        "LR" : lr,
     }
 
 
@@ -411,13 +416,18 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
         else None,
         device=device,
     )
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
+    if hyperparams["OPTIMIZER"] == "SGD":
+        optimizer = torch.optim.SGD(model.parameters(), lr=hyperparams["LR"])
+    else:
+        optimizer = getattr(optim, hyperparams["OPTIMIZER"])(model.parameters(), lr=hyperparams["LR"])
+    
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
-        max_lr=0.1,
+        max_lr=hyperparams["LR"],
         steps_per_epoch=len(train_loader),
         epochs=hyperparams["EPOCHS"],
         pct_start=0.05,
+        cycle_momentum=True if hyperparams["OPTIMIZER"] == "SGD" else False
     )
     # Amp loss scaler
     scaler = (
