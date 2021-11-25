@@ -15,7 +15,7 @@ from torch.utils.data import DataLoader, random_split
 from torchvision.datasets import ImageFolder, VisionDataset
 
 from src.utils.data import weights_for_balanced_classes
-from src.utils.torch_utils import split_dataset_index
+from src.utils.torch_utils import split_dataset_index, subset_sampler
 
 
 def create_dataloader(
@@ -41,6 +41,7 @@ def create_dataloader(
         transform_test=config["AUG_TEST"],
         transform_train_params=config["AUG_TRAIN_PARAMS"],
         transform_test_params=config.get("AUG_TEST_PARAMS"),
+        subset_sampling_ratio=config["SUBSET_SAMPLING_RATIO"],
     )
 
     return get_dataloader(
@@ -60,6 +61,7 @@ def get_dataset(
     transform_test: str = "simple_augment_test",
     transform_train_params: Dict[str, int] = None,
     transform_test_params: Dict[str, int] = None,
+    subset_sampling_ratio: float = 0.0,
 ) -> Tuple[VisionDataset, VisionDataset, VisionDataset]:
     """Get dataset for training and testing."""
     if not transform_train_params:
@@ -85,6 +87,10 @@ def get_dataset(
         test_path = os.path.join(data_path, "test")
 
         train_dataset = ImageFolder(root=train_path, transform=transform_train)
+
+        if subset_sampling_ratio > 0:
+            train_dataset = subset_sampler(train_dataset)
+
         val_dataset = ImageFolder(root=val_path, transform=transform_test)
         test_dataset = ImageFolder(root=test_path, transform=transform_test)
 
@@ -95,6 +101,10 @@ def get_dataset(
         train_dataset = Dataset(
             root=data_path, train=True, download=True, transform=transform_train
         )
+
+        if subset_sampling_ratio > 0:
+            train_dataset = subset_sampler(train_dataset, subset_sampling_ratio)
+
         # from train dataset, train: 80%, val: 20%
         train_length = int(len(train_dataset) * (1.0-val_ratio))
         train_dataset, val_dataset = random_split(
