@@ -43,7 +43,7 @@ def stratified_random_split(dataset, lengths):
     randomly split a dataset into non-overlapping new datasets of given lengths.
     Optionally fix the generator for reproducible results, e.g.:
 
-    >>> random_split(range(10), [3, 7])
+    >>> stratified_random_split(range(10), [3, 7])
 
     Arguments:
         dataset (Dataset): Dataset to be split
