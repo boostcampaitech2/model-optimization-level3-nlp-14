@@ -12,7 +12,10 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import Subset
+from torch._utils import _accumulate
+from torch import randperm, default_generator
 
+from sklearn.model_selection import train_test_split
 
 def convert_model_to_torchscript(
     model: nn.Module, path: Optional[str] = None
@@ -57,6 +60,20 @@ def split_dataset_index(
     valid_subset = Subset(train_dataset, valid_idx)
 
     return train_subset, valid_subset
+
+
+def subset_sampler(dataset: torch.utils.data.Dataset, sampling_ratio: int=0.1):
+    """Make subset by sampling from dataset
+
+    Args:
+        dataset (torch.utils.data.Dataset): Dataset to be sampled
+        sampling_ratio (int, optional): Defaults to 0.1.
+
+    Returns:
+        torch.utils.data.Dataset: subset of dataset
+    """
+    _, subset_indices = train_test_split(list(range(len(dataset.targets))), test_size=sampling_ratio, stratify=dataset.targets)
+    return Subset(dataset, subset_indices)
 
 
 def save_model(model, path, data, device):
