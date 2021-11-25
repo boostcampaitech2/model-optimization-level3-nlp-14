@@ -54,7 +54,7 @@ def get_dataloader(img_root: str, data_config: str) -> DataLoader:
     data_config = read_yaml(data_config)
 
     transform_test_args = (
-        data_confg["AUG_TEST_PARAMS"] if data_config.get("AUG_TEST_PARAMS") else None
+        data_config["AUG_TEST_PARAMS"] if data_config.get("AUG_TEST_PARAMS") else None
     )
     # Transformation for test
     transform_test = getattr(
