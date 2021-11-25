@@ -148,7 +148,7 @@ if __name__ == "__main__":
         default=os.environ.get('SM_OUTPUT_DATA_DIR')
     )
     parser.add_argument("--model_dir", type=str, help="Saved model root directory which includes 'best.pt', 'data.yml', and, 'model.yml'", default='/opt/ml/code/exp/latest')
-    parser.add_argument("--weight_name", type=str, help="Model weight file name. (best.pt, best.ts, ...)", default="best.pt")
+    parser.add_argument("--weight_name", type=str, help="Model weight file name. (best.pt, best.ts, ...)", default="best.ps")
     parser.add_argument(
         "--img_root",
         type=str,
