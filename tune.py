@@ -2,13 +2,18 @@
 - Author: Junghoon Kim, Jongsun Shin
 - Contact: placidus36@gmail.com, shinn1897@makinarocks.ai
 """
+import os
+from datetime import datetime
+import yaml
 import optuna
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from src.dataloader import create_dataloader
+from src.loss import CustomCriterion
 from src.model import Model
 from src.utils.torch_utils import model_info, check_runtime
+from src.utils.common import get_label_counts
 from src.trainer import TorchTrainer, count_model_params
 from typing import Any, Dict, List, Tuple
 from optuna.pruners import HyperbandPruner
@@ -17,14 +22,12 @@ import argparse
 
 
 DATA_PATH = "/opt/ml/data"  # type your data path here that contains test, train and val directories
-RESULT_MODEL_PATH = "./result_model.pt" # result model will be saved in this path
-
 
 def search_hyperparam(trial: optuna.trial.Trial) -> Dict[str, Any]:
     """Search hyperparam from user-specified search space."""
-    epochs = trial.suggest_int("epochs", low=50, high=50, step=50)
+    epochs = 50 # trial.suggest_int("epochs", low=50, high=100, step=50)
     img_size = trial.suggest_categorical("img_size", [96, 112, 168, 224])
-    n_select = trial.suggest_int("n_select", low=0, high=6, step=2)
+    n_select = trial.suggest_int("n_select", low=2, high=6, step=2)
     batch_size = trial.suggest_int("batch_size", low=16, high=32, step=16)
     return {
         "EPOCHS": epochs,
@@ -340,7 +343,7 @@ def search_model(trial: optuna.trial.Trial) -> List[Any]:
     return model, module_info
 
 
-def objective(trial: optuna.trial.Trial, device) -> Tuple[float, int, float]:
+def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, int, float]:
     """Optuna objective.
     Args:
         trial
@@ -360,9 +363,13 @@ def objective(trial: optuna.trial.Trial, device) -> Tuple[float, int, float]:
         "width_multiple", [0.25, 0.5, 0.75, 1.0]
     )
     model_config["backbone"], module_info = search_model(trial)
+
+    
     hyperparams = search_hyperparam(trial)
 
     model = Model(model_config, verbose=True)
+    model_path = os.path.join(log_dir, "best.pt") # result model will be saved in this path
+    print(f"Model save path: {model_path}")
     model.to(device)
     model.model.to(device)
 
@@ -377,9 +384,18 @@ def objective(trial: optuna.trial.Trial, device) -> Tuple[float, int, float]:
     }
     data_config["AUG_TEST_PARAMS"] = None
     data_config["BATCH_SIZE"] = hyperparams["BATCH_SIZE"]
-    data_config["VAL_RATIO"] = 0.8
+    data_config["VAL_RATIO"] = 0.2
     data_config["IMG_SIZE"] = hyperparams["IMG_SIZE"]
-    data_config["SUBSET_SAMPLING_RATIO"] = 0.25 #
+    data_config["FP16"] = True
+    data_config["SUBSET_SAMPLING_RATIO"] = 0.4
+
+
+    # save model_config, data_config
+    with open(os.path.join(log_dir, "data.yml"), "w") as f:
+        yaml.dump(data_config, f, default_flow_style=False)
+    with open(os.path.join(log_dir, "model.yml"), "w") as f:
+        yaml.dump(model_config, f, default_flow_style=False)
+
 
     mean_time = check_runtime(
         model.model,
@@ -389,7 +405,12 @@ def objective(trial: optuna.trial.Trial, device) -> Tuple[float, int, float]:
     model_info(model, verbose=True)
     train_loader, val_loader, test_loader = create_dataloader(data_config)
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = CustomCriterion(
+        samples_per_cls=get_label_counts(data_config["DATA_PATH"])
+        if data_config["DATASET"] == "TACO"
+        else None,
+        device=device,
+    )
     optimizer = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9)
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
@@ -398,15 +419,20 @@ def objective(trial: optuna.trial.Trial, device) -> Tuple[float, int, float]:
         epochs=hyperparams["EPOCHS"],
         pct_start=0.05,
     )
+    # Amp loss scaler
+    scaler = (
+        torch.cuda.amp.GradScaler() if data_config["FP16"] and device != torch.device("cpu") else None
+    )
 
     trainer = TorchTrainer(
-        model,
-        criterion,
-        optimizer,
-        scheduler,
+        model=model,
+        criterion=criterion,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        scaler=scaler,
+        model_path=model_path,
         device=device,
         verbose=1,
-        model_path=RESULT_MODEL_PATH,
     )
     trainer.train(train_loader, hyperparams["EPOCHS"], val_dataloader=val_loader)
     loss, f1_score, acc_percent = trainer.test(model, test_dataloader=val_loader)
@@ -461,6 +487,17 @@ def tune(gpu_id, storage: str = None):
         rdb_storage = optuna.storages.RDBStorage(url=storage)
     else:
         rdb_storage = None
+
+    log_dir = os.path.join("/opt/ml/code", os.path.join("exp", 'latest'))
+    # log_dir = os.environ.get("SM_MODEL_DIR", os.path.join("exp", 'latest')) 
+
+    if os.path.exists(log_dir): 
+        modified = datetime.fromtimestamp(os.path.getmtime(log_dir + '/best.pt'))
+        new_log_dir = os.path.dirname(log_dir) + '/' + modified.strftime("%Y-%m-%d_%H-%M-%S")
+        os.rename(log_dir, new_log_dir)
+
+    os.makedirs(log_dir, exist_ok=True)
+
     study = optuna.create_study(
         directions=["maximize", "minimize", "minimize"],
         study_name="automl101",
@@ -468,7 +505,7 @@ def tune(gpu_id, storage: str = None):
         storage=rdb_storage,
         load_if_exists=True,
     )
-    study.optimize(lambda trial: objective(trial, device), n_trials=500)
+    study.optimize(lambda trial: objective(trial, log_dir, device), n_trials=4)
 
     pruned_trials = [
         t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED
