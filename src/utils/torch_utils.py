@@ -37,6 +37,26 @@ def convert_model_to_torchscript(
     return jit_model
 
 
+def stratified_random_split(dataset, lengths):
+    r"""
+    Stratified Version of torch.utils.data.random_split
+    randomly split a dataset into non-overlapping new datasets of given lengths.
+    Optionally fix the generator for reproducible results, e.g.:
+
+    >>> random_split(range(10), [3, 7])
+
+    Arguments:
+        dataset (Dataset): Dataset to be split
+        lengths (sequence): lengths of splits to be produced
+    """
+    if sum(lengths) != len(dataset):
+        raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
+
+    val_ratio = lengths[1] / len(dataset)
+    train_indices, val_indices = train_test_split(list(range(len(dataset.targets))), test_size=val_ratio, stratify=dataset.targets)
+    return [Subset(dataset, train_indices), Subset(dataset, val_indices)]
+
+
 def split_dataset_index(
     train_dataset: torch.utils.data.Dataset, n_data: int, split_ratio: float = 0.1
 ) -> Tuple[Subset, Subset]:
