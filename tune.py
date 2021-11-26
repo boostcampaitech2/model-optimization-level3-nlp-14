@@ -356,10 +356,11 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
         float: score1(e.g. accuracy)
         int: score2(e.g. params)
     """
+    hyperparams = search_hyperparam(trial)
+
     model_config: Dict[str, Any] = {}
     model_config["input_channel"] = 3
-    # img_size = trial.suggest_categorical("img_size", [32, 64, 128])
-    img_size = 32
+    img_size = hyperparams["IMG_SIZE"]
     model_config["INPUT_SIZE"] = [img_size, img_size]
     model_config["depth_multiple"] = trial.suggest_categorical(
         "depth_multiple", [0.25, 0.5, 0.75, 1.0]
@@ -370,7 +371,6 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     model_config["backbone"], module_info = search_model(trial)
 
     
-    hyperparams = search_hyperparam(trial)
 
     model = Model(model_config, verbose=True)
     model_path = os.path.join(log_dir, "best.pt") # result model will be saved in this path
@@ -392,7 +392,7 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     data_config["VAL_RATIO"] = 0.2
     data_config["IMG_SIZE"] = hyperparams["IMG_SIZE"]
     data_config["FP16"] = True
-    data_config["SUBSET_SAMPLING_RATIO"] = 0.4
+    data_config["SUBSET_SAMPLING_RATIO"] = 0.4 # 0 means full data
 
 
     # save model_config, data_config
