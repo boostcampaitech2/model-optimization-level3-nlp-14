@@ -41,7 +41,7 @@ def create_dataloader(
         transform_test=config["AUG_TEST"],
         transform_train_params=config["AUG_TRAIN_PARAMS"],
         transform_test_params=config.get("AUG_TEST_PARAMS"),
-        subset_sampling_ratio=config["SUBSET_SAMPLING_RATIO"],
+        subset_sampling_ratio=config["SUBSET_SAMPLING_RATIO"] if config.get("SUBSET_SAMPLING_RATIO") is not None else 0.0,
     )
 
     return get_dataloader(
