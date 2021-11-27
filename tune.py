@@ -3,6 +3,7 @@
 - Contact: placidus36@gmail.com, shinn1897@makinarocks.ai
 """
 import os
+import pickle
 from datetime import datetime
 import yaml
 import optuna
@@ -19,18 +20,17 @@ from typing import Any, Dict, List, Tuple
 from optuna.pruners import HyperbandPruner
 from subprocess import _args_from_interpreter_flags
 import argparse
-
+from optuna.integration.wandb import WeightsAndBiasesCallback # optuna>=v2.9.0
 
 DATA_PATH = "/opt/ml/data"  # type your data path here that contains test, train and val directories
-
 def search_hyperparam(trial: optuna.trial.Trial) -> Dict[str, Any]:
     """Search hyperparam from user-specified search space."""
-    epochs = 50 # trial.suggest_int("epochs", low=50, high=100, step=50)
+    epochs = 10 # trial.suggest_int("epochs", low=50, high=100, step=50)
     img_size = trial.suggest_categorical("img_size", [96, 112, 168, 224])
-    n_select = trial.suggest_int("n_select", low=2, high=6, step=2)
+    n_select = trial.suggest_int("n_select", low=0, high=6, step=2)
     batch_size = trial.suggest_int("batch_size", low=16, high=32, step=16)
-    optimizer_name = trial.suggest_categorical("optimizer", ["Adam"])
-    lr = trial.suggest_float("lr", 1e-4, 1e-2,log=True)
+    optimizer_name = trial.suggest_categorical("optimizer", ["Adam", "SGD"])
+    init_lr = trial.suggest_float("init_lr", 1e-4, 1e-1,log=True)
     
     return {
         "EPOCHS": epochs,
@@ -38,7 +38,7 @@ def search_hyperparam(trial: optuna.trial.Trial) -> Dict[str, Any]:
         "n_select": n_select,
         "BATCH_SIZE": batch_size,
         "OPTIMIZER" : optimizer_name,
-        "LR" : lr,
+        "INIT_LR" : init_lr,
     }
 
 
@@ -382,6 +382,7 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     data_config: Dict[str, Any] = {}
     data_config["DATA_PATH"] = DATA_PATH
     data_config["DATASET"] = "TACO"
+    data_config["IMG_SIZE"] = hyperparams["IMG_SIZE"]
     data_config["AUG_TRAIN"] = "randaugment_train"
     data_config["AUG_TEST"] = "simple_augment_test"
     data_config["AUG_TRAIN_PARAMS"] = {
@@ -389,18 +390,17 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     }
     data_config["AUG_TEST_PARAMS"] = None
     data_config["BATCH_SIZE"] = hyperparams["BATCH_SIZE"]
+    data_config["EPOCHS"] = hyperparams["EPOCHS"]
     data_config["VAL_RATIO"] = 0.2
-    data_config["IMG_SIZE"] = hyperparams["IMG_SIZE"]
+    data_config["INIT_LR"] = hyperparams["INIT_LR"]
     data_config["FP16"] = True
-    data_config["SUBSET_SAMPLING_RATIO"] = 0.4 # 0 means full data
+    data_config["SUBSET_SAMPLING_RATIO"] = 0.5 # 0 means full data
 
-
-    # save model_config, data_config
-    with open(os.path.join(log_dir, "data.yml"), "w") as f:
-        yaml.dump(data_config, f, default_flow_style=False)
-    with open(os.path.join(log_dir, "model.yml"), "w") as f:
-        yaml.dump(model_config, f, default_flow_style=False)
-
+    trial.set_user_attr('hyperparams',  hyperparams)
+    trial.set_user_attr('model_config', model_config)
+    trial.set_user_attr('data_config', data_config)
+    for key, value in trial.params.items():
+        print(f"    {key}:{value}")
 
     mean_time = check_runtime(
         model.model,
@@ -417,13 +417,13 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
         device=device,
     )
     if hyperparams["OPTIMIZER"] == "SGD":
-        optimizer = torch.optim.SGD(model.parameters(), lr=hyperparams["LR"])
+        optimizer = torch.optim.SGD(model.parameters(), lr=hyperparams["INIT_LR"])
     else:
-        optimizer = getattr(optim, hyperparams["OPTIMIZER"])(model.parameters(), lr=hyperparams["LR"])
+        optimizer = getattr(optim, hyperparams["OPTIMIZER"])(model.parameters(), lr=hyperparams["INIT_LR"])
     
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
-        max_lr=hyperparams["LR"],
+        max_lr=hyperparams["INIT_LR"],
         steps_per_epoch=len(train_loader),
         epochs=hyperparams["EPOCHS"],
         pct_start=0.05,
@@ -449,6 +449,7 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     params_nums = count_model_params(model)
 
     model_info(model, verbose=True)
+    print('='*50)
     return f1_score, params_nums, mean_time
 
 
@@ -461,12 +462,12 @@ def get_best_trial_with_condition(optuna_study: optuna.study.Study) -> Dict[str,
     """
     df = optuna_study.trials_dataframe().rename(
         columns={
-            "values_0": "acc_percent",
+            "values_0": "f1_score",
             "values_1": "params_nums",
             "values_2": "mean_time",
         }
     )
-    ## minimum condition : accuracy >= threshold
+    ## minimum condition : f1_score >= threshold
     threshold = 0.7
     minimum_cond = df.acc_percent >= threshold
 
@@ -508,6 +509,9 @@ def tune(gpu_id, storage: str = None):
 
     os.makedirs(log_dir, exist_ok=True)
 
+    wandb_kwargs = {"project": "optuna-test-du", 'name': 'test'}
+    wandbc = WeightsAndBiasesCallback(wandb_kwargs=wandb_kwargs, metric_name=['value_0', 'value_1', 'value_2'])
+
     study = optuna.create_study(
         directions=["maximize", "minimize", "minimize"],
         study_name="automl101",
@@ -515,7 +519,7 @@ def tune(gpu_id, storage: str = None):
         storage=rdb_storage,
         load_if_exists=True,
     )
-    study.optimize(lambda trial: objective(trial, log_dir, device), n_trials=4)
+    study.optimize(lambda trial: objective(trial, log_dir, device), n_trials=100, callbacks=[wandbc], n_jobs=1)
 
     pruned_trials = [
         t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED
@@ -534,17 +538,36 @@ def tune(gpu_id, storage: str = None):
 
     ## trials that satisfies Pareto Fronts
     for tr in best_trials:
-        print(f"  value1:{tr.values[0]}, value2:{tr.values[1]}")
+        print(f"  value1:{tr.values[0]}, value2:{tr.values[1]}, value3:{tr.values[2]}")
+        save_path = os.path.join(log_dir, f'trial_id-{str(tr._trial_id).zfill(4)}')
+        os.makedirs(save_path, exist_ok=True)
+        tr_info = os.path.join(save_path, f"f1_{tr.values[0]:.4f}-n_params_{tr.values[1]}-time_{tr.values[2]:.4f}.txt")
+        with open(tr_info, "w") as f:
+            f.write(f"""f1:{tr.values[0]}
+            n_params:{tr.values[1]}
+            time:{tr.values[2]}
+            """)
+        with open(os.path.join(save_path, "hyperparams.yml"), "w") as f:
+            yaml.dump(tr.user_attrs['hyperparams'], f, default_flow_style=None, sort_keys=False)
+        with open(os.path.join(save_path, "model.yml"), "w") as f:
+            yaml.dump(tr.user_attrs['model_config'], f, default_flow_style=None, sort_keys=False)
+        with open(os.path.join(save_path, "data.yml"), "w") as f:
+            yaml.dump(tr.user_attrs['data_config'], f, default_flow_style=None, sort_keys=False)
+        
         for key, value in tr.params.items():
             print(f"    {key}:{value}")
 
+    with open(os.path.join(log_dir, 'study.pkl'), 'wb') as f:
+        pickle.dump(study, f)
     best_trial = get_best_trial_with_condition(study)
     print(best_trial)
+    with open(os.path.join(log_dir, 'best_trials.pkl'), 'wb') as f:
+        pickle.dump(best_trials, f)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Optuna tuner.")
     parser.add_argument("--gpu", default=0, type=int, help="GPU id to use")
-    parser.add_argument("--storage", default="", type=str, help="Optuna database storage path.")
+    parser.add_argument("--storage", default="sqlite:///exp.db", type=str, help="Optuna database storage path.")
     args = parser.parse_args()
     tune(args.gpu, storage=args.storage if args.storage != "" else None)
