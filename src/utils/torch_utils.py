@@ -12,7 +12,10 @@ import numpy as np
 import torch
 from torch import nn
 from torch.utils.data import Subset
+from torch._utils import _accumulate
+from torch import randperm, default_generator
 
+from sklearn.model_selection import train_test_split
 
 def convert_model_to_torchscript(
     model: nn.Module, path: Optional[str] = None
@@ -32,6 +35,26 @@ def convert_model_to_torchscript(
         jit_model.save(path)
 
     return jit_model
+
+
+def stratified_random_split(dataset, lengths):
+    r"""
+    Stratified Version of torch.utils.data.random_split
+    randomly split a dataset into non-overlapping new datasets of given lengths.
+    Optionally fix the generator for reproducible results, e.g.:
+
+    >>> stratified_random_split(range(10), [3, 7])
+
+    Arguments:
+        dataset (Dataset): Dataset to be split
+        lengths (sequence): lengths of splits to be produced
+    """
+    if sum(lengths) != len(dataset):
+        raise ValueError("Sum of input lengths does not equal the length of the input dataset!")
+
+    val_ratio = lengths[1] / len(dataset)
+    train_indices, val_indices = train_test_split(list(range(len(dataset.targets))), test_size=val_ratio, stratify=dataset.targets)
+    return [Subset(dataset, train_indices), Subset(dataset, val_indices)]
 
 
 def split_dataset_index(
@@ -57,6 +80,20 @@ def split_dataset_index(
     valid_subset = Subset(train_dataset, valid_idx)
 
     return train_subset, valid_subset
+
+
+def subset_sampler(dataset: torch.utils.data.Dataset, sampling_ratio: int=0.1):
+    """Make subset by sampling from dataset
+
+    Args:
+        dataset (torch.utils.data.Dataset): Dataset to be sampled
+        sampling_ratio (int, optional): Defaults to 0.1.
+
+    Returns:
+        torch.utils.data.Dataset: subset of dataset
+    """
+    _, subset_indices = train_test_split(list(range(len(dataset.targets))), test_size=sampling_ratio, stratify=dataset.targets)
+    return Subset(dataset, subset_indices)
 
 
 def save_model(model, path, data, device):
@@ -185,6 +222,54 @@ class Activation:
                 __import__("src.modules.activations", fromlist=[""]), self.type
             )()
 
+
+class EarlyStopping:
+    """주어진 patience 이후로 validation loss가 개선되지 않으면 학습을 조기 중지
+    Ref : https://quokkas.tistory.com/37
+    """
+    def __init__(self, path, patience=7, verbose=False, delta=0):
+        """
+        Args:
+            path (str): checkpoint저장 경로
+            patience (int): validation loss가 개선된 후 기다리는 기간
+                            Default: 7
+            verbose (bool): True일 경우 각 validation loss의 개선 사항 메세지 출력
+                            Default: False
+            delta (float): 개선되었다고 인정되는 monitered quantity의 최소 변화
+                            Default: 0
+        """
+        self.patience = patience
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.val_loss_min = np.Inf
+        self.delta = delta
+        self.path = path
+
+    def __call__(self, val_loss, model):
+
+        score = -val_loss
+
+        if self.best_score is None:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+        elif score < self.best_score + self.delta:
+            self.counter += 1
+            print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self.save_checkpoint(val_loss, model)
+            self.counter = 0
+
+    def save_checkpoint(self, val_loss, model):
+        '''validation loss가 감소하면 모델을 저장한다.'''
+        if self.verbose:
+            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
+        save_model(model, self.path, None, None)
+        self.val_loss_min = val_loss
 
 if __name__ == "__main__":
     # test

@@ -54,7 +54,7 @@ def get_dataloader(img_root: str, data_config: str) -> DataLoader:
     data_config = read_yaml(data_config)
 
     transform_test_args = (
-        data_confg["AUG_TEST_PARAMS"] if data_config.get("AUG_TEST_PARAMS") else None
+        data_config["AUG_TEST_PARAMS"] if data_config.get("AUG_TEST_PARAMS") else None
     )
     # Transformation for test
     transform_test = getattr(
@@ -148,7 +148,7 @@ if __name__ == "__main__":
         default=os.environ.get('SM_OUTPUT_DATA_DIR')
     )
     parser.add_argument("--model_dir", type=str, help="Saved model root directory which includes 'best.pt', 'data.yml', and, 'model.yml'", default='/opt/ml/code/exp/latest')
-    parser.add_argument("--weight_name", type=str, help="Model weight file name. (best.pt, best.ts, ...)", default="best.pt")
+    parser.add_argument("--weight_name", type=str, help="Model weight file name. (best.pt, best.ts, ...)", default="best.ts")
     parser.add_argument(
         "--img_root",
         type=str,

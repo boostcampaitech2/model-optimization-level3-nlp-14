@@ -19,7 +19,7 @@ from torch.utils.data.dataset import Dataset
 from torch.utils.data.sampler import SequentialSampler, SubsetRandomSampler
 from tqdm import tqdm
 
-from src.utils.torch_utils import save_model
+from src.utils.torch_utils import EarlyStopping
 
 
 def _get_n_data_from_dataloader(dataloader: DataLoader) -> int:
@@ -107,6 +107,7 @@ class TorchTrainer:
         self.scaler = scaler
         self.verbose = verbose
         self.device = device
+        self.early_stopping = EarlyStopping(self.model_path, patience = 3, delta=0)
 
     def train(
         self,
@@ -172,7 +173,7 @@ class TorchTrainer:
                 )
             pbar.close()
 
-            _, test_f1, test_acc = self.test(
+            val_loss, test_f1, test_acc = self.test(
                 model=self.model, test_dataloader=val_dataloader
             )
             if best_test_f1 > test_f1:
@@ -180,12 +181,10 @@ class TorchTrainer:
             best_test_acc = test_acc
             best_test_f1 = test_f1
             print(f"Model saved. Current best test f1: {best_test_f1:.3f}")
-            save_model(
-                model=self.model,
-                path=self.model_path,
-                data=data,
-                device=self.device,
-            )
+            self.early_stopping(val_loss, self.model)
+            if self.early_stopping.early_stop:
+                print("Early Stopping")
+                return best_test_acc, best_test_f1
 
         return best_test_acc, best_test_f1
 
