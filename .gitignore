@@ -234,3 +234,6 @@ $RECYCLE.BIN/
 exp/
 *.csv
 *.pkl
+*.db
+wandb/
+exp_train/
