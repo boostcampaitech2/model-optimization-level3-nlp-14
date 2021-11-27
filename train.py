@@ -105,15 +105,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data", default="configs/data/taco.yaml", type=str, help="data config"
     )
+    parser.add_argument(
+        "--epochs", default=100, type=int, help="epochs"
+    )
     args = parser.parse_args()
 
     model_config = read_yaml(cfg=args.model)
     data_config = read_yaml(cfg=args.data)
-
+    model_config["EPOCHS"] = args.epochs
     data_config["DATA_PATH"] = os.environ.get("SM_CHANNEL_TRAIN", data_config["DATA_PATH"])
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    log_dir = os.environ.get("SM_MODEL_DIR", os.path.join("exp", 'latest'))
+    log_dir = os.environ.get("SM_MODEL_DIR", os.path.join("exp_train", 'latest'))
 
     if os.path.exists(log_dir): 
         modified = datetime.fromtimestamp(os.path.getmtime(log_dir + '/best.pt'))
@@ -129,4 +132,3 @@ if __name__ == "__main__":
         fp16=data_config["FP16"],
         device=device,
     )
-
