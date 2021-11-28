@@ -3,10 +3,12 @@
 - Author: Junghoon Kim
 - Email: placidus36@gmail.com
 """
+import os
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from src.utils.common import get_label_counts
 
 
 class CustomCriterion:
@@ -46,3 +48,58 @@ class CustomCriterion:
         logits_adjusted = logits + self.logit_adj_val.repeat(labels.shape[0], 1)
         loss = F.cross_entropy(input=logits_adjusted, target=labels)
         return loss
+
+
+class FocalLoss(nn.Module):
+    def __init__(self, weight, alpha=1, gamma=2, logits=False, reduce=True):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.logits = logits
+        self.reduce = reduce
+        self.weights = weight
+
+    def forward(self, inputs, targets):
+        ce_loss = nn.CrossEntropyLoss(weight=self.weights)(inputs, targets)
+        pt = torch.exp(-ce_loss)
+        F_loss = self.alpha * (1-pt)**self.gamma * ce_loss
+
+        if self.reduce:
+            return torch.mean(F_loss)
+        else:
+            return F_loss
+
+
+class ContrastiveLoss(torch.nn.Module):
+    """
+    Contrastive loss function.
+    Based on: http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf
+    """
+
+    def __init__(self, margin=2.0):
+        super(ContrastiveLoss, self).__init__()
+        self.margin = margin
+
+    def forward(self, output1, output2, label):
+        euclidean_distance = F.pairwise_distance(output1, output2, keepdim = True)
+        loss_contrastive = torch.mean((1-label) * torch.pow(euclidean_distance, 2) +
+                                      (label) * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2))
+
+
+def get_weights(data_path):
+    class_num = get_label_counts(os.path.join(data_path, "train"))
+    base_class = np.max(class_num)
+    weights = (base_class / np.array(class_num))
+    return weights
+
+
+def get_loss(config, weight, device):
+    if config == 'CrossEntropy':
+        loss_fn = nn.CrossEntropyLoss()
+    elif config == 'CrossEntropy_Weight':
+        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor(weight).to(device, dtype=torch.half))
+    elif config == 'FocalLoss_Weight':
+        loss_fn = FocalLoss(weight=torch.tensor(weight).to(device, dtype=torch.half))
+    elif config == 'ContrastiveLoss':
+        loss_fn = ContrastiveLoss()
+    return loss_fn
