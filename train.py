@@ -53,9 +53,11 @@ def train(
     train_dl, val_dl, test_dl = create_dataloader(data_config)
 
     # Create optimizer, scheduler, criterion
-    optimizer = torch.optim.SGD(
-        model_instance.model.parameters(), lr=data_config["INIT_LR"], momentum=0.9
-    )
+    if hyperparams["OPTIMIZER"] == "SGD":
+        optimizer = torch.optim.SGD(model_instance.model.parameters(), lr=hyperparams["INIT_LR"])
+    else:
+        optimizer = getattr(optim, hyperparams["OPTIMIZER"])(model_instance.model.parameters(), lr=hyperparams["INIT_LR"])
+
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer=optimizer,
         max_lr=data_config["INIT_LR"],
