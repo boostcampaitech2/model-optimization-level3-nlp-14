@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from src.dataloader import create_dataloader
-from src.loss import CustomCriterion
+from src.loss import CustomCriterion, get_class_weights
 from src.model import Model
 from src.utils.torch_utils import model_info, check_runtime
 from src.utils.common import get_label_counts
@@ -410,11 +410,13 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     model_info(model, verbose=True)
     train_loader, val_loader, test_loader = create_dataloader(data_config)
 
+    weights = get_class_weights(data_config["DATA_PATH"])
     criterion = CustomCriterion(
         samples_per_cls=get_label_counts(data_config["DATA_PATH"])
         if data_config["DATASET"] == "TACO"
         else None,
         device=device,
+        weights=weights
     )
     if hyperparams["OPTIMIZER"] == "SGD":
         optimizer = torch.optim.SGD(model.parameters(), lr=hyperparams["INIT_LR"])
@@ -501,15 +503,16 @@ def tune(gpu_id, storage: str = None):
 
     log_dir = os.path.join("/opt/ml/code", os.path.join("exp", 'latest'))
     # log_dir = os.environ.get("SM_MODEL_DIR", os.path.join("exp", 'latest')) 
+    log_dir_start = log_dir + '/best.pt'
 
-    if os.path.exists(log_dir): 
+    if os.path.exists(log_dir_start): 
         modified = datetime.fromtimestamp(os.path.getmtime(log_dir + '/best.pt'))
         new_log_dir = os.path.dirname(log_dir) + '/' + modified.strftime("%Y-%m-%d_%H-%M-%S")
         os.rename(log_dir, new_log_dir)
 
     os.makedirs(log_dir, exist_ok=True)
 
-    wandb_kwargs = {"project": "optuna-test-du", 'name': 'test'}
+    wandb_kwargs = {"project": "optuna-loss-ce", 'name': 'crossentropy-weight'}
     wandbc = WeightsAndBiasesCallback(wandb_kwargs=wandb_kwargs, metric_name=['value_0', 'value_1', 'value_2'])
 
     study = optuna.create_study(
