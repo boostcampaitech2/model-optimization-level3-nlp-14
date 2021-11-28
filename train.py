@@ -5,6 +5,7 @@
 
 import argparse
 import os
+import pickle
 from datetime import datetime
 from typing import Any, Dict, Tuple, Union
 
@@ -12,6 +13,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import yaml
+import wandb
 
 from src.dataloader import create_dataloader
 from src.loss import CustomCriterion
@@ -22,6 +24,7 @@ from src.utils.torch_utils import check_runtime, model_info
 
 
 def train(
+    hyperparams: Dict[str, Any],
     model_config: Dict[str, Any],
     data_config: Dict[str, Any],
     log_dir: str,
@@ -30,6 +33,8 @@ def train(
 ) -> Tuple[float, float, float]:
     """Train."""
     # save model_config, data_config
+    with open(os.path.join(log_dir, "hyperparams.yml"), "w") as f:
+        yaml.dump(hyperparams, f, default_flow_style=False)
     with open(os.path.join(log_dir, "data.yml"), "w") as f:
         yaml.dump(data_config, f, default_flow_style=False)
     with open(os.path.join(log_dir, "model.yml"), "w") as f:
@@ -64,6 +69,7 @@ def train(
         else None,
         device=device,
     )
+    wandb.watch(model_instance.model, criterion, log='all', log_freq=10)
     # Amp loss scaler
     scaler = (
         torch.cuda.amp.GradScaler() if fp16 and device != torch.device("cpu") else None
@@ -84,6 +90,7 @@ def train(
         train_dataloader=train_dl,
         n_epoch=data_config["EPOCHS"],
         val_dataloader=val_dl if val_dl else test_dl,
+        wandb_log=True,
     )
 
     # evaluate model with test set
@@ -110,11 +117,16 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    model_config = read_yaml(cfg=args.model)
-    data_config = read_yaml(cfg=args.data)
-    model_config["EPOCHS"] = args.epochs
-    data_config["DATA_PATH"] = os.environ.get("SM_CHANNEL_TRAIN", data_config["DATA_PATH"])
+    # Load yml file from exp/latest/trial_id-####
+    hyperparams = read_yaml(cfg=os.path.join(args.trial_dir, 'hyperparams.yml'))
+    model_config = read_yaml(cfg=os.path.join(args.trial_dir, 'model.yml'))
+    data_config = read_yaml(cfg=os.path.join(args.trial_dir, 'data.yml'))
 
+    # Modify hyperparameter for training
+    data_config["EPOCHS"] = args.epochs
+    data_config["SUBSET_SAMPLING_RATIO"] = 0
+    data_config["AUG_TRAIN_PARAMS"] = {"n_select" : 6}
+    data_config["DATA_PATH"] = os.environ.get("SM_CHANNEL_TRAIN", data_config["DATA_PATH"])
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     log_dir = os.environ.get("SM_MODEL_DIR", os.path.join("exp_train", 'latest'))
 
@@ -125,10 +137,20 @@ if __name__ == "__main__":
 
     os.makedirs(log_dir, exist_ok=True)
 
+    wandb.init(project="optuna-test-du-best_trials", name='trial_0073-rs42-randaug2-resume_test')
+    wandb.config.update({
+        'hyperparams' : hyperparams,
+        'model_config' : model_config,
+        'data_config' : data_config
+        })
+
     test_loss, test_f1, test_acc = train(
+        hyperparams=hyperparams,
         model_config=model_config,
         data_config=data_config,
         log_dir=log_dir,
+        new_log_dir=new_log_dir,
+        resume=True,
         fp16=data_config["FP16"],
         device=device,
     )
