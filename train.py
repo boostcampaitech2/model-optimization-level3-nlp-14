@@ -41,6 +41,8 @@ def train(
     model_config: Dict[str, Any],
     data_config: Dict[str, Any],
     log_dir: str,
+    new_log_dir: str,
+    resume: bool,
     fp16: bool,
     device: torch.device,
 ) -> Tuple[float, float, float]:
@@ -73,13 +75,15 @@ def train(
 
     model_instance = Model(model_config, verbose=True)
     model_path = os.path.join(log_dir, "best.pt")
+    resume_model_path = os.path.join(new_log_dir, "best.pt")
+
     print(f"Model save path: {model_path}")
-    if os.path.isfile(model_path):
+    if os.path.isfile(resume_model_path) and resume:
+        print("Resume Training from ", resume_model_path)
         model_instance.model.load_state_dict(
-            torch.load(model_path, map_location=device)
+            torch.load(resume_model_path, map_location=device)
         )
     model_instance.model.to(device)
-
     # Create dataloader
     train_dl, val_dl, test_dl = create_dataloader(data_config)
 
