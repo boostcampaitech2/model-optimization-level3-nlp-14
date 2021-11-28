@@ -141,16 +141,13 @@ def train(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train model.")
     parser.add_argument(
-        "--model",
-        default="configs/model/mobilenetv3.yaml",
+        "--trial_dir",
+        default="exp/latest/trial_id-0073",
         type=str,
-        help="model config",
+        help="config dir",
     )
     parser.add_argument(
-        "--data", default="configs/data/taco.yaml", type=str, help="data config"
-    )
-    parser.add_argument(
-        "--epochs", default=100, type=int, help="epochs"
+        "--epochs", default=1, type=int, help="epochs"
     )
     args = parser.parse_args()
 
