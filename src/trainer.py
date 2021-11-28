@@ -18,6 +18,7 @@ from torch.utils.data.dataloader import DataLoader
 from torch.utils.data.dataset import Dataset
 from torch.utils.data.sampler import SequentialSampler, SubsetRandomSampler
 from tqdm import tqdm
+import wandb
 
 from src.utils.torch_utils import EarlyStopping
 
@@ -114,6 +115,7 @@ class TorchTrainer:
         train_dataloader: DataLoader,
         n_epoch: int,
         val_dataloader: Optional[DataLoader] = None,
+        wandb_log=False,
     ) -> Tuple[float, float]:
         """Train model.
 
@@ -130,6 +132,11 @@ class TorchTrainer:
         num_classes = _get_len_label_from_dataset(train_dataloader.dataset)
         label_list = [i for i in range(num_classes)]
 
+        # Run training and track with wandb
+        total_batches = len(train_dataloader) * n_epoch
+        example_ct = 0  # number of examples seen
+        batch_ct = 0
+        
         for epoch in range(n_epoch):
             running_loss, correct, total = 0.0, 0, 0
             preds, gt = [], []
@@ -171,11 +178,32 @@ class TorchTrainer:
                     f"Acc: {(correct / total) * 100:.2f}% "
                     f"F1(macro): {f1_score(y_true=gt, y_pred=preds, labels=label_list, average='macro', zero_division=0):.2f}"
                 )
+
+                example_ct += len(labels)
+                batch_ct += 1
+                if wandb_log and ((batch_ct + 1) % 100) == 0:
+                    wandb.log(
+                        {
+                            "epoch": epoch,
+                            "loss" : running_loss / (batch + 1),
+                            "acc" : correct / total,
+                            "F1(macro)" : f1_score(y_true=gt, y_pred=preds, labels=label_list, average='macro', zero_division=0)
+                        }, step=example_ct)
+                    # print(f"Loss after " + str(example_ct).zfill(5) + f" examples: {loss:.3f}")
+            
             pbar.close()
 
             val_loss, test_f1, test_acc = self.test(
                 model=self.model, test_dataloader=val_dataloader
             )
+            if wandb_log:
+                wandb.log(
+                    {
+                        "eval_loss" : val_loss,
+                        "eval_acc" : test_acc,
+                        "eval_F1(macro)" : test_f1
+                    }, step=example_ct)
+        
             if best_test_f1 > test_f1:
                 continue
             best_test_acc = test_acc
