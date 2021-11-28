@@ -14,27 +14,17 @@ from src.utils.common import get_label_counts
 class CustomCriterion:
     """Custom Criterion."""
 
-    def __init__(self, samples_per_cls, device, fp16=False, loss_type="softmax", weights=None, focal=False):
+    def __init__(self, samples_per_cls, device, fp16=False, loss_type="softmax"):
         if not samples_per_cls:
             loss_type = "softmax"
         else:
             self.samples_per_cls = samples_per_cls
             self.frequency_per_cls = samples_per_cls / np.sum(samples_per_cls)
             self.no_of_classes = len(samples_per_cls)
-            # max_class = np.max(self.samples_per_cls)
-            # self.weights = (max_class / np.array(self.samples_per_cls))  
-        if weights is not None:
-            self.weights = weights
-        if focal is not None:
-            self.focal=False
         self.device = device
         self.fp16 = fp16
 
-        if loss_type == "softmax" and self.weights is not None and self.focal:
-            self.criterion = FocalLoss(weight=torch.tensor(self.weights).to(self.device, dtype=torch.half))
-        elif loss_type == "softmax" and self.weights is not None:
-            self.criterion = nn.CrossEntropyLoss(weight=torch.tensor(self.weights).to(self.device, dtype=torch.half))
-        elif loss_type == "softmax":
+        if loss_type == "softmax":
             self.criterion = nn.CrossEntropyLoss()
         elif loss_type == "logit_adjustment_loss":
             tau = 1.0
@@ -80,8 +70,36 @@ class FocalLoss(nn.Module):
             return F_loss
 
 
-def get_class_weights(data_path):
+class ContrastiveLoss(torch.nn.Module):
+    """
+    Contrastive loss function.
+    Based on: http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf
+    """
+
+    def __init__(self, margin=2.0):
+        super(ContrastiveLoss, self).__init__()
+        self.margin = margin
+
+    def forward(self, output1, output2, label):
+        euclidean_distance = F.pairwise_distance(output1, output2, keepdim = True)
+        loss_contrastive = torch.mean((1-label) * torch.pow(euclidean_distance, 2) +
+                                      (label) * torch.pow(torch.clamp(self.margin - euclidean_distance, min=0.0), 2))
+
+
+def get_weights(data_path):
     class_num = get_label_counts(os.path.join(data_path, "train"))
     base_class = np.max(class_num)
-    class_weight = (base_class / np.array(class_num))
-    return class_weight
+    weights = (base_class / np.array(class_num))
+    return weights
+
+
+def get_loss(config, weight, device):
+    if config == 'CrossEntropy':
+        loss_fn = nn.CrossEntropyLoss()
+    elif config == 'CrossEntropy_Weight':
+        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor(weight).to(device, dtype=torch.half))
+    elif config == 'FocalLoss_Weight':
+        loss_fn = FocalLoss(weight=torch.tensor(weight).to(device, dtype=torch.half))
+    elif config == 'ContrastiveLoss':
+        loss_fn = ContrastiveLoss()
+    return loss_fn

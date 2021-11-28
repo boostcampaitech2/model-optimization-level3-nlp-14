@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from src.dataloader import create_dataloader
-from src.loss import CustomCriterion, get_class_weights
+from src.loss import CustomCriterion, get_weights, get_loss
 from src.model import Model
 from src.utils.torch_utils import model_info, check_runtime
 from src.utils.common import get_label_counts
@@ -395,6 +395,7 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     data_config["INIT_LR"] = hyperparams["INIT_LR"]
     data_config["FP16"] = True
     data_config["SUBSET_SAMPLING_RATIO"] = 0.5 # 0 means full data
+    data_config["LOSS"] = 'CrossEntropy_Weight'
 
     trial.set_user_attr('hyperparams',  hyperparams)
     trial.set_user_attr('model_config', model_config)
@@ -410,14 +411,9 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     model_info(model, verbose=True)
     train_loader, val_loader, test_loader = create_dataloader(data_config)
 
-    weights = get_class_weights(data_config["DATA_PATH"])
-    criterion = CustomCriterion(
-        samples_per_cls=get_label_counts(data_config["DATA_PATH"])
-        if data_config["DATASET"] == "TACO"
-        else None,
-        device=device,
-        weights=weights
-    )
+    weights = get_weights(data_config["DATA_PATH"])
+    criterion = get_loss(data_config["LOSS"], weight=weights, device=device)
+
     if hyperparams["OPTIMIZER"] == "SGD":
         optimizer = torch.optim.SGD(model.parameters(), lr=hyperparams["INIT_LR"])
     else:
