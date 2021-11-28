@@ -5,6 +5,8 @@
 
 import argparse
 import os
+import yaml
+import random
 import pickle
 from datetime import datetime
 from typing import Any, Dict, Tuple, Union
@@ -12,7 +14,7 @@ from typing import Any, Dict, Tuple, Union
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import yaml
+import numpy as np
 import wandb
 
 from src.dataloader import create_dataloader
@@ -21,6 +23,17 @@ from src.model import Model
 from src.trainer import TorchTrainer
 from src.utils.common import get_label_counts, read_yaml
 from src.utils.torch_utils import check_runtime, model_info
+
+
+def set_seed(seed: int = 42):
+    random.seed(seed) # random
+    np.random.seed(seed) # numpy
+    os.environ["PYTHONHASHSEED"] = str(seed) # os
+    # pytorch
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) 
+    torch.backends.cudnn.deterministic = True 
+    torch.backends.cudnn.benchmark = False 
 
 
 def train(
@@ -32,6 +45,24 @@ def train(
     device: torch.device,
 ) -> Tuple[float, float, float]:
     """Train."""
+    
+    set_seed(seed=42)
+    
+    # Save RNG state in non-distributed training
+    rng_states = {
+        "python": random.getstate(),
+        "numpy": np.random.get_state(),
+        "cpu": torch.random.get_rng_state(),
+    }
+    print("RNG_STATES: ", rng_states)
+
+    if torch.cuda.is_available():
+        # In non distributed, we save the global CUDA RNG state (will take care of DataParallel)
+        rng_states["cuda"] = torch.cuda.random.get_rng_state_all()
+
+    with open(os.path.join(log_dir, "rng_state.pkl"), "wb") as f:
+        pickle.dump(data_config, f)
+
     # save model_config, data_config
     with open(os.path.join(log_dir, "hyperparams.yml"), "w") as f:
         yaml.dump(hyperparams, f, default_flow_style=False)
