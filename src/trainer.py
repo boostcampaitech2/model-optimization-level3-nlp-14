@@ -108,7 +108,7 @@ class TorchTrainer:
         self.scaler = scaler
         self.verbose = verbose
         self.device = device
-        self.early_stopping = EarlyStopping(self.model_path, patience = 3, delta=0)
+        self.early_stopping = EarlyStopping(self.model_path, patience = 1000, delta=0)
 
     def train(
         self,
@@ -209,7 +209,7 @@ class TorchTrainer:
             best_test_acc = test_acc
             best_test_f1 = test_f1
             print(f"Model saved. Current best test f1: {best_test_f1:.3f}")
-            self.early_stopping(val_loss, self.model)
+            self.early_stopping(val_loss, self.model, self.optimizer, self.scheduler)
             if self.early_stopping.early_stop:
                 print("Early Stopping")
                 return best_test_acc, best_test_f1

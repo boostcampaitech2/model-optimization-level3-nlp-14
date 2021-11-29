@@ -96,11 +96,17 @@ def subset_sampler(dataset: torch.utils.data.Dataset, sampling_ratio: int=0.1):
     return Subset(dataset, subset_indices)
 
 
-def save_model(model, path, data, device):
+def save_model(model, path, optmizer, scheduler):
     """save model to torch script, onnx."""
     try:
         torch.save(model.state_dict(), f=path)
         ts_path = os.path.splitext(path)[:-1][0] + ".ts"
+        scheduler_optimizer_path = os.path.splitext(path)[:-1][0] + f"_sch_opt_step{scheduler.last_epoch}.pth.tar"
+        torch.save({
+            'optimizer' : optmizer.state_dict(),
+            'scheduler' : scheduler.state_dict()
+            },
+            scheduler_optimizer_path)
         convert_model_to_torchscript(model, ts_path)
     except Exception:
         print("Failed to save torch")
@@ -247,13 +253,13 @@ class EarlyStopping:
         self.delta = delta
         self.path = path
 
-    def __call__(self, val_loss, model):
+    def __call__(self, val_loss, model, optmizer, scheduler):
 
         score = -val_loss
 
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.save_checkpoint(val_loss, model, optmizer, scheduler)
         elif score < self.best_score + self.delta:
             self.counter += 1
             print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
@@ -261,14 +267,14 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.save_checkpoint(val_loss, model, optmizer, scheduler)
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model):
+    def save_checkpoint(self, val_loss, model, optmizer, scheduler):
         '''validation loss가 감소하면 모델을 저장한다.'''
         if self.verbose:
             print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
-        save_model(model, self.path, None, None)
+        save_model(model, self.path, optmizer, scheduler)
         self.val_loss_min = val_loss
 
 if __name__ == "__main__":
