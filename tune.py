@@ -412,7 +412,7 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     train_loader, val_loader, test_loader = create_dataloader(data_config)
 
     weights = get_weights(data_config["DATA_PATH"])
-    criterion = get_loss(data_config["LOSS"], weight=weights, device=device)
+    criterion = get_loss(data_config["LOSS"], data_config["FP16"], weight=weights, device=device)
 
     if hyperparams["OPTIMIZER"] == "SGD":
         optimizer = torch.optim.SGD(model.parameters(), lr=hyperparams["INIT_LR"])
