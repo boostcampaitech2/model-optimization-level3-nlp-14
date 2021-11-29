@@ -87,19 +87,30 @@ class ContrastiveLoss(torch.nn.Module):
 
 
 def get_weights(data_path):
+    """get class weights by scikit-learn way
+    ref : https://scikit-learn.org/stable/modules/generated/sklearn.utils.class_weight.compute_class_weight.html
+
+    Args:
+        data_path (str): dataset path
+
+    Returns:
+        numpy.ndarray: class weights
+    """
     class_num = get_label_counts(os.path.join(data_path, "train"))
-    base_class = np.max(class_num)
-    weights = (base_class / np.array(class_num))
+    n_samples = sum(class_num)
+    bin_count = np.array(class_num)
+    n_classes = len(class_num)
+    weights = n_samples / (n_classes * bin_count)
     return weights
 
 
-def get_loss(config, weight, device):
-    if config == 'CrossEntropy':
+def get_loss(loss_fn, fp16, weight, device):
+    if loss_fn == 'CrossEntropy':
         loss_fn = nn.CrossEntropyLoss()
-    elif config == 'CrossEntropy_Weight':
-        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor(weight).to(device, dtype=torch.half))
-    elif config == 'FocalLoss_Weight':
-        loss_fn = FocalLoss(weight=torch.tensor(weight).to(device, dtype=torch.half))
-    elif config == 'ContrastiveLoss':
+    elif loss_fn == 'CrossEntropy_Weight':
+        loss_fn = nn.CrossEntropyLoss(weight=torch.tensor(weight).to(device, dtype=torch.half if fp16 else torch.float))
+    elif loss_fn == 'FocalLoss_Weight':
+        loss_fn = FocalLoss(weight=torch.tensor(weight).to(device, dtype=torch.half if fp16 else torch.float))
+    elif loss_fn == 'ContrastiveLoss':
         loss_fn = ContrastiveLoss()
     return loss_fn
