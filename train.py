@@ -18,7 +18,7 @@ import numpy as np
 import wandb
 
 from src.dataloader import create_dataloader
-from src.loss import CustomCriterion
+from src.loss import get_weights, get_loss
 from src.model import Model
 from src.trainer import TorchTrainer
 from src.utils.common import get_label_counts, read_yaml
@@ -100,12 +100,8 @@ def train(
         epochs=data_config["EPOCHS"],
         pct_start=0.05,
     )
-    criterion = CustomCriterion(
-        samples_per_cls=get_label_counts(data_config["DATA_PATH"])
-        if data_config["DATASET"] == "TACO"
-        else None,
-        device=device,
-    )
+    weights = get_weights(data_config["DATA_PATH"])
+    criterion = get_loss(data_config["LOSS"], data_config["FP16"], weight=weights, device=device)
     wandb.watch(model_instance.model, criterion, log='all', log_freq=10)
     # Amp loss scaler
     scaler = (
@@ -147,7 +143,7 @@ if __name__ == "__main__":
         help="config dir",
     )
     parser.add_argument(
-        "--epochs", default=1, type=int, help="epochs"
+        "--epochs", default=1000, type=int, help="epochs"
     )
     args = parser.parse_args()
 
@@ -159,6 +155,7 @@ if __name__ == "__main__":
     # Modify hyperparameter for training
     data_config["EPOCHS"] = args.epochs
     data_config["SUBSET_SAMPLING_RATIO"] = 0
+    data_config["LOSS"] = 'CrossEntropy_Weight'
     data_config["AUG_TRAIN_PARAMS"] = {"n_select" : 6}
     data_config["DATA_PATH"] = os.environ.get("SM_CHANNEL_TRAIN", data_config["DATA_PATH"])
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -168,10 +165,12 @@ if __name__ == "__main__":
         modified = datetime.fromtimestamp(os.path.getmtime(log_dir + '/best.pt'))
         new_log_dir = os.path.dirname(log_dir) + '/' + modified.strftime("%Y-%m-%d_%H-%M-%S")
         os.rename(log_dir, new_log_dir)
+    else:
+        new_log_dir = ""
 
     os.makedirs(log_dir, exist_ok=True)
 
-    wandb.init(project="optuna-test-du-best_trials", name='trial_0073-rs42-randaug2-resume_test')
+    wandb.init(project="optuna-test", name='trial_0073')
     wandb.config.update({
         'hyperparams' : hyperparams,
         'model_config' : model_config,
@@ -184,7 +183,7 @@ if __name__ == "__main__":
         data_config=data_config,
         log_dir=log_dir,
         new_log_dir=new_log_dir,
-        resume=True,
+        resume=False,
         fp16=data_config["FP16"],
         device=device,
     )
