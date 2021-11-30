@@ -1,4 +1,5 @@
 """PyTorch trainer module.
+
 - Author: Jongkuk Lim, Junghoon Kim
 - Contact: lim.jeikei@gmail.com, placidus36@gmail.com
 """
@@ -24,8 +25,10 @@ from src.utils.torch_utils import EarlyStopping
 
 def _get_n_data_from_dataloader(dataloader: DataLoader) -> int:
     """Get a number of data in dataloader.
+
     Args:
         dataloader: torch dataloader
+
     Returns:
         A number of data in dataloader
     """
@@ -41,8 +44,10 @@ def _get_n_data_from_dataloader(dataloader: DataLoader) -> int:
 
 def _get_n_batch_from_dataloader(dataloader: DataLoader) -> int:
     """Get a batch number in dataloader.
+
     Args:
         dataloader: torch dataloader
+
     Returns:
         A batch number in dataloader
     """
@@ -54,8 +59,10 @@ def _get_n_batch_from_dataloader(dataloader: DataLoader) -> int:
 
 def _get_len_label_from_dataset(dataset: Dataset) -> int:
     """Get length of label from dataset.
+
     Args:
         dataset: torch dataset
+
     Returns:
         A number of label in set.
     """
@@ -74,7 +81,8 @@ class TorchTrainer:
 
     def __init__(
         self,
-        model: nn.Module,
+        student_model: nn.Module,
+        teacher_model: nn.Module,
         criterion: nn.Module,
         optimizer: optim.Optimizer,
         scheduler,
@@ -84,6 +92,7 @@ class TorchTrainer:
         verbose: int = 1,
     ) -> None:
         """Initialize TorchTrainer class.
+
         Args:
             model: model to train
             criterion: loss function module
@@ -92,7 +101,8 @@ class TorchTrainer:
             verbose: verbosity level.
         """
 
-        self.model = model
+        self.student_model = student_model
+        self.teacher_model = teacher_model
         self.model_path = model_path
         self.criterion = criterion
         self.optimizer = optimizer
@@ -110,10 +120,12 @@ class TorchTrainer:
         wandb_log=False,
     ) -> Tuple[float, float]:
         """Train model.
+
         Args:
             train_dataloader: data loader module which is a iterator that returns (data, labels)
             n_epoch: number of total epochs for training
             val_dataloader: dataloader for validation
+
         Returns:
             loss and accuracy
         """
@@ -127,21 +139,27 @@ class TorchTrainer:
         example_ct = 0  # number of examples seen
         batch_ct = 0
         
+
         for epoch in range(n_epoch):
             running_loss, correct, total = 0.0, 0, 0
             preds, gt = [], []
             pbar = tqdm(enumerate(train_dataloader), total=len(train_dataloader))
-            self.model.train()
+            
+            self.student_model.train()
+            self.teacher_model.eval()
+            
             for batch, (data, labels) in pbar:
                 data, labels = data.to(self.device), labels.to(self.device)
 
                 if self.scaler:
                     with torch.cuda.amp.autocast():
-                        outputs = self.model(data)
+                        student_outputs = self.student_model(data)
+                        teacher_outputs = self.teacher_model(data)
                 else:
-                    outputs = self.model(data)
-                outputs = torch.squeeze(outputs)
-                loss = self.criterion(outputs, labels)
+                    student_outputs = self.student_model(data)
+                    teacher_outputs = self.teacher_model(data)
+                # outputs = torch.squeeze(outputs)
+                loss = self.criterion(student_outputs, labels, teacher_outputs)
 
                 self.optimizer.zero_grad()
 
@@ -154,7 +172,7 @@ class TorchTrainer:
                     self.optimizer.step()
                 self.scheduler.step()
 
-                _, pred = torch.max(outputs, 1)
+                _, pred = torch.max(student_outputs, 1)
                 total += labels.size(0)
                 correct += (pred == labels).sum().item()
                 preds += pred.to("cpu").tolist()
@@ -211,8 +229,10 @@ class TorchTrainer:
         self, model: nn.Module, test_dataloader: DataLoader
     ) -> Tuple[float, float, float]:
         """Test model.
+
         Args:
             test_dataloader: test data loader module which is a iterator that returns (data, labels)
+
         Returns:
             loss, f1, accuracy
         """

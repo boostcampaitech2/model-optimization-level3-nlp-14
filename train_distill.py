@@ -19,7 +19,7 @@ import wandb
 
 from src.dataloader import create_dataloader
 from src.loss import get_weights, get_loss
-from src.model import Efficientnet_b0
+from src.model import Efficientnet_b0, Model
 from src.trainer import TorchTrainer
 from src.utils.common import get_label_counts, read_yaml
 from src.utils.torch_utils import check_runtime, model_info
@@ -38,7 +38,7 @@ def set_seed(seed: int = 42):
 
 def train(
     hyperparams: Dict[str, Any],
-    model,
+    model_config: Dict[str, Any],
     data_config: Dict[str, Any],
     log_dir: str,
     new_log_dir: str,
@@ -70,26 +70,33 @@ def train(
         yaml.dump(hyperparams, f, default_flow_style=False)
     with open(os.path.join(log_dir, "data.yml"), "w") as f:
         yaml.dump(data_config, f, default_flow_style=False)
+    with open(os.path.join(log_dir, "model.yml"), "w") as f:
+        yaml.dump(model_config, f, default_flow_style=False)
 
-    model = model
+    
     model_path = os.path.join(log_dir, "best.pt")
     resume_model_path = os.path.join(new_log_dir, "best.pt")
+
+    student_model = Model(model_config, verbose=True)
+    teacher_model = Efficientnet_b0()
+    teacher_model.load_state_dict(torch.load(model_path))
 
     print(f"Model save path: {model_path}")
     if os.path.isfile(resume_model_path) and resume:
         print("Resume Training from ", resume_model_path)
-        model.load_state_dict(
+        student_model.model.load_state_dict(
             torch.load(resume_model_path, map_location=device)
         )
-    model.to(device)
+    student_model.model.to(device)
+    teacher_model.to(device)
     # Create dataloader
     train_dl, val_dl, test_dl = create_dataloader(data_config)
 
     # Create optimizer, scheduler, criterion
     if hyperparams["OPTIMIZER"] == "SGD":
-        optimizer = torch.optim.SGD(model.parameters(), lr=hyperparams["INIT_LR"])
+        optimizer = torch.optim.SGD(student_model.model.parameters(), lr=hyperparams["INIT_LR"])
     else:
-        optimizer = getattr(optim, hyperparams["OPTIMIZER"])(model.parameters(), lr=hyperparams["INIT_LR"])
+        optimizer = getattr(optim, hyperparams["OPTIMIZER"])(student_model.model.parameters(), lr=hyperparams["INIT_LR"])
 
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer=optimizer,
@@ -100,7 +107,7 @@ def train(
     )
     weights = get_weights(data_config["DATA_PATH"])
     criterion = get_loss(data_config["LOSS"], data_config["FP16"], weight=weights, device=device)
-    wandb.watch(model, criterion, log='all', log_freq=10)
+    wandb.watch(student_model.model, criterion, log='all', log_freq=10)
     # Amp loss scaler
     scaler = (
         torch.cuda.amp.GradScaler() if fp16 and device != torch.device("cpu") else None
@@ -108,7 +115,8 @@ def train(
 
     # Create trainer
     trainer = TorchTrainer(
-        model=model,
+        student_model=student_model.model,
+        teacher_model=teacher_model,
         criterion=criterion,
         optimizer=optimizer,
         scheduler=scheduler,
@@ -125,9 +133,9 @@ def train(
     )
 
     # evaluate model with test set
-    model.load_state_dict(torch.load(model_path))
+    student_model.model.load_state_dict(torch.load(model_path))
     test_loss, test_f1, test_acc = trainer.test(
-        model=model, test_dataloader=val_dl if val_dl else test_dl
+        model=student_model.model, test_dataloader=val_dl if val_dl else test_dl
     )
     return test_loss, test_f1, test_acc
 
@@ -136,30 +144,30 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train model.")
     parser.add_argument(
         "--trial_dir",
-        default="exp/latest/trial_id-val71",
+        default="exp/latest/trial_id-0073",
         type=str,
         help="config dir",
     )
     parser.add_argument(
-        "--epochs", default=14, type=int, help="epochs"
+        "--epochs", default=1000, type=int, help="epochs"
     )
     args = parser.parse_args()
 
     # Load yml file from exp/latest/trial_id-####
     hyperparams = read_yaml(cfg=os.path.join(args.trial_dir, 'hyperparams.yml'))
+    model_config = read_yaml(cfg=os.path.join(args.trial_dir, 'model.yml'))
     data_config = read_yaml(cfg=os.path.join(args.trial_dir, 'data.yml'))
-    model = Efficientnet_b0()
+
     # Modify hyperparameter for training
     data_config["EPOCHS"] = args.epochs
     data_config["SUBSET_SAMPLING_RATIO"] = 0
     data_config["LOSS"] = 'CrossEntropy_Weight'
-    data_config["AUG_TRAIN_PARAMS"] = {"n_select" : 0}
+    data_config["AUG_TRAIN_PARAMS"] = {"n_select" : 6}
     data_config["DATA_PATH"] = os.environ.get("SM_CHANNEL_TRAIN", data_config["DATA_PATH"])
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     log_dir = os.environ.get("SM_MODEL_DIR", os.path.join("exp_train", 'latest'))
-    log_dir_start = log_dir + '/best.pt'
 
-    if os.path.exists(log_dir_start): 
+    if os.path.exists(log_dir): 
         modified = datetime.fromtimestamp(os.path.getmtime(log_dir + '/best.pt'))
         new_log_dir = os.path.dirname(log_dir) + '/' + modified.strftime("%Y-%m-%d_%H-%M-%S")
         os.rename(log_dir, new_log_dir)
@@ -168,15 +176,16 @@ if __name__ == "__main__":
 
     os.makedirs(log_dir, exist_ok=True)
 
-    wandb.init(project="optuna-backbone-ce", name='efficientnetb0_train_save_ts')
+    wandb.init(project="optuna-test", name='trial_0073')
     wandb.config.update({
         'hyperparams' : hyperparams,
+        'model_config' : model_config,
         'data_config' : data_config
         })
 
     test_loss, test_f1, test_acc = train(
         hyperparams=hyperparams,
-        model=model,
+        model_config=model_config,
         data_config=data_config,
         log_dir=log_dir,
         new_log_dir=new_log_dir,
