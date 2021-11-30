@@ -19,7 +19,7 @@ import wandb
 
 from src.dataloader import create_dataloader
 from src.loss import get_weights, get_loss
-from src.model import Model
+from src.model import Efficientnet_b0, Model
 from src.trainer import TorchTrainer
 from src.utils.common import get_label_counts, read_yaml
 from src.utils.torch_utils import check_runtime, model_info
@@ -73,25 +73,27 @@ def train(
     with open(os.path.join(log_dir, "model.yml"), "w") as f:
         yaml.dump(model_config, f, default_flow_style=False)
 
-    model_instance = Model(model_config, verbose=True)
+    student_model = Model(model_config, verbose=True)
+    teacher_model = Efficientnet_b0()
     model_path = os.path.join(log_dir, "best.pt")
     resume_model_path = os.path.join(new_log_dir, "best.pt")
 
     print(f"Model save path: {model_path}")
     if os.path.isfile(resume_model_path) and resume:
         print("Resume Training from ", resume_model_path)
-        model_instance.model.load_state_dict(
+        student_model.model.load_state_dict(
             torch.load(resume_model_path, map_location=device)
         )
-    model_instance.model.to(device)
+    student_model.model.to(device)
+    teacher_model.to(device)
     # Create dataloader
     train_dl, val_dl, test_dl = create_dataloader(data_config)
 
     # Create optimizer, scheduler, criterion
     if hyperparams["OPTIMIZER"] == "SGD":
-        optimizer = torch.optim.SGD(model_instance.model.parameters(), lr=hyperparams["INIT_LR"])
+        optimizer = torch.optim.SGD(student_model.model.parameters(), lr=hyperparams["INIT_LR"])
     else:
-        optimizer = getattr(optim, hyperparams["OPTIMIZER"])(model_instance.model.parameters(), lr=hyperparams["INIT_LR"])
+        optimizer = getattr(optim, hyperparams["OPTIMIZER"])(student_model.model.parameters(), lr=hyperparams["INIT_LR"])
 
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer=optimizer,
@@ -102,7 +104,7 @@ def train(
     )
     weights = get_weights(data_config["DATA_PATH"])
     criterion = get_loss(data_config["LOSS"], data_config["FP16"], weight=weights, device=device)
-    wandb.watch(model_instance.model, criterion, log='all', log_freq=10)
+    wandb.watch(student_model.model, criterion, log='all', log_freq=10)
     # Amp loss scaler
     scaler = (
         torch.cuda.amp.GradScaler() if fp16 and device != torch.device("cpu") else None
@@ -110,7 +112,8 @@ def train(
 
     # Create trainer
     trainer = TorchTrainer(
-        model=model_instance.model,
+        student_model=student_model.model,
+        teacher_model=teacher_model,
         criterion=criterion,
         optimizer=optimizer,
         scheduler=scheduler,
@@ -127,9 +130,9 @@ def train(
     )
 
     # evaluate model with test set
-    model_instance.model.load_state_dict(torch.load(model_path))
+    student_model.model.load_state_dict(torch.load(model_path))
     test_loss, test_f1, test_acc = trainer.test(
-        model=model_instance.model, test_dataloader=val_dl if val_dl else test_dl
+        model=student_model.model, test_dataloader=val_dl if val_dl else test_dl
     )
     return test_loss, test_f1, test_acc
 
