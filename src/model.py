@@ -9,6 +9,7 @@ from typing import Dict, List, Type, Union
 import torch
 import torch.nn as nn
 import yaml
+import timm
 
 from src.modules import ModuleGenerator
 
@@ -124,3 +125,18 @@ class ModelParser:
         )
 
         return parsed_model
+
+
+class Efficientnet_b0(nn.Module):
+    def __init__(self, num_classes: int = 6):
+        super().__init__()
+        self.pretrained = timm.create_model('efficientnet_b0', pretrained=True)
+        self.pretrained.classifier = nn.Sequential(
+            nn.Linear(1280, 512, bias=True),
+            nn.LeakyReLU(0.3),
+            nn.Linear(512, num_classes, bias=True),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.pretrained(x)
+        return x
