@@ -161,7 +161,7 @@ if __name__ == "__main__":
     # Modify hyperparameter for training
     data_config["EPOCHS"] = args.epochs
     data_config["SUBSET_SAMPLING_RATIO"] = 0
-    data_config["LOSS"] = 'CrossEntropy_Weight'
+    data_config["LOSS"] = 'DistillationLoss_Weight'
     data_config["AUG_TRAIN_PARAMS"] = {"n_select" : 6}
     data_config["DATA_PATH"] = os.environ.get("SM_CHANNEL_TRAIN", data_config["DATA_PATH"])
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
