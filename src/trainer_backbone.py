@@ -1,5 +1,4 @@
 """PyTorch trainer module.
-
 - Author: Jongkuk Lim, Junghoon Kim
 - Contact: lim.jeikei@gmail.com, placidus36@gmail.com
 """
@@ -11,7 +10,6 @@ from typing import Optional, Tuple, Union
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import torch.optim as optim
 import torchvision
 from sklearn.metrics import f1_score
@@ -26,10 +24,8 @@ from src.utils.torch_utils import EarlyStopping
 
 def _get_n_data_from_dataloader(dataloader: DataLoader) -> int:
     """Get a number of data in dataloader.
-
     Args:
         dataloader: torch dataloader
-
     Returns:
         A number of data in dataloader
     """
@@ -45,10 +41,8 @@ def _get_n_data_from_dataloader(dataloader: DataLoader) -> int:
 
 def _get_n_batch_from_dataloader(dataloader: DataLoader) -> int:
     """Get a batch number in dataloader.
-
     Args:
         dataloader: torch dataloader
-
     Returns:
         A batch number in dataloader
     """
@@ -60,10 +54,8 @@ def _get_n_batch_from_dataloader(dataloader: DataLoader) -> int:
 
 def _get_len_label_from_dataset(dataset: Dataset) -> int:
     """Get length of label from dataset.
-
     Args:
         dataset: torch dataset
-
     Returns:
         A number of label in set.
     """
@@ -82,8 +74,7 @@ class TorchTrainer:
 
     def __init__(
         self,
-        student_model: nn.Module,
-        teacher_model: nn.Module,
+        model: nn.Module,
         criterion: nn.Module,
         optimizer: optim.Optimizer,
         scheduler,
@@ -93,7 +84,6 @@ class TorchTrainer:
         verbose: int = 1,
     ) -> None:
         """Initialize TorchTrainer class.
-
         Args:
             model: model to train
             criterion: loss function module
@@ -102,8 +92,7 @@ class TorchTrainer:
             verbose: verbosity level.
         """
 
-        self.student_model = student_model
-        self.teacher_model = teacher_model
+        self.model = model
         self.model_path = model_path
         self.criterion = criterion
         self.optimizer = optimizer
@@ -121,12 +110,10 @@ class TorchTrainer:
         wandb_log=False,
     ) -> Tuple[float, float]:
         """Train model.
-
         Args:
             train_dataloader: data loader module which is a iterator that returns (data, labels)
             n_epoch: number of total epochs for training
             val_dataloader: dataloader for validation
-
         Returns:
             loss and accuracy
         """
@@ -140,27 +127,21 @@ class TorchTrainer:
         example_ct = 0  # number of examples seen
         batch_ct = 0
         
-
         for epoch in range(n_epoch):
             running_loss, correct, total = 0.0, 0, 0
             preds, gt = [], []
             pbar = tqdm(enumerate(train_dataloader), total=len(train_dataloader))
-            
-            self.student_model.train()
-            self.teacher_model.eval()
-            
+            self.model.train()
             for batch, (data, labels) in pbar:
                 data, labels = data.to(self.device), labels.to(self.device)
 
                 if self.scaler:
                     with torch.cuda.amp.autocast():
-                        student_outputs = self.student_model(data)
-                        teacher_outputs = self.teacher_model(data)
+                        outputs = self.model(data)
                 else:
-                    student_outputs = self.student_model(data)
-                    teacher_outputs = self.teacher_model(data)
-                student_outputs = torch.squeeze(student_outputs)
-                loss = self.criterion(student_outputs, labels, teacher_outputs)
+                    outputs = self.model(data)
+                outputs = torch.squeeze(outputs)
+                loss = self.criterion(outputs, labels)
 
                 self.optimizer.zero_grad()
 
@@ -173,7 +154,7 @@ class TorchTrainer:
                     self.optimizer.step()
                 self.scheduler.step()
 
-                _, pred = torch.max(student_outputs, 1)
+                _, pred = torch.max(outputs, 1)
                 total += labels.size(0)
                 correct += (pred == labels).sum().item()
                 preds += pred.to("cpu").tolist()
@@ -203,7 +184,7 @@ class TorchTrainer:
             pbar.close()
 
             val_loss, test_f1, test_acc = self.test(
-                student_model=self.student_model, test_dataloader=val_dataloader
+                model=self.model, test_dataloader=val_dataloader
             )
             if wandb_log:
                 wandb.log(
@@ -218,7 +199,7 @@ class TorchTrainer:
             best_test_acc = test_acc
             best_test_f1 = test_f1
             print(f"Model saved. Current best test f1: {best_test_f1:.3f}")
-            self.early_stopping(val_loss, self.student_model, self.optimizer, self.scheduler)
+            self.early_stopping(val_loss, self.model, self.optimizer, self.scheduler)
             if self.early_stopping.early_stop:
                 print("Early Stopping")
                 return best_test_acc, best_test_f1
@@ -227,13 +208,11 @@ class TorchTrainer:
 
     @torch.no_grad()
     def test(
-        self, student_model: nn.Module, test_dataloader: DataLoader
+        self, model: nn.Module, test_dataloader: DataLoader
     ) -> Tuple[float, float, float]:
         """Test model.
-
         Args:
             test_dataloader: test data loader module which is a iterator that returns (data, labels)
-
         Returns:
             loss, f1, accuracy
         """
@@ -250,19 +229,19 @@ class TorchTrainer:
         label_list = [i for i in range(num_classes)]
 
         pbar = tqdm(enumerate(test_dataloader), total=len(test_dataloader))
-        student_model.to(self.device)
-        student_model.eval()
+        model.to(self.device)
+        model.eval()
         for batch, (data, labels) in pbar:
             data, labels = data.to(self.device), labels.to(self.device)
 
             if self.scaler:
                 with torch.cuda.amp.autocast():
-                    outputs = student_model(data)
+                    outputs = model(data)
             else:
-                outputs = student_model(data)
+                outputs = model(data)
             outputs = torch.squeeze(outputs)
-            # running_loss += self.criterion(outputs, labels).item()
-            running_loss += F.cross_entropy(input=outputs, target=labels).item()
+            running_loss += self.criterion(outputs, labels).item()
+
             _, pred = torch.max(outputs, 1)
             total += labels.size(0)
             correct += (pred == labels).sum().item()

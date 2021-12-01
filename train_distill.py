@@ -79,7 +79,7 @@ def train(
 
     student_model = Model(model_config, verbose=True)
     teacher_model = Efficientnet_b0()
-    teacher_model.load_state_dict(torch.load(model_path))
+    teacher_model.load_state_dict(torch.load("/opt/ml/code/exp/latest/trial_id-kd/teacher_model.pt"))
 
     print(f"Model save path: {model_path}")
     if os.path.isfile(resume_model_path) and resume:
@@ -135,7 +135,7 @@ def train(
     # evaluate model with test set
     student_model.model.load_state_dict(torch.load(model_path))
     test_loss, test_f1, test_acc = trainer.test(
-        model=student_model.model, test_dataloader=val_dl if val_dl else test_dl
+        stduent_model=student_model.model, test_dataloader=val_dl if val_dl else test_dl
     )
     return test_loss, test_f1, test_acc
 
@@ -144,12 +144,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train model.")
     parser.add_argument(
         "--trial_dir",
-        default="exp/latest/trial_id-0073",
+        default="exp/latest/trial_id-kd",
         type=str,
         help="config dir",
     )
     parser.add_argument(
-        "--epochs", default=1000, type=int, help="epochs"
+        "--epochs", default=700, type=int, help="epochs"
     )
     args = parser.parse_args()
 
@@ -166,8 +166,9 @@ if __name__ == "__main__":
     data_config["DATA_PATH"] = os.environ.get("SM_CHANNEL_TRAIN", data_config["DATA_PATH"])
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     log_dir = os.environ.get("SM_MODEL_DIR", os.path.join("exp_train", 'latest'))
+    log_dir_start = log_dir + '/best.pt'
 
-    if os.path.exists(log_dir): 
+    if os.path.exists(log_dir_start): 
         modified = datetime.fromtimestamp(os.path.getmtime(log_dir + '/best.pt'))
         new_log_dir = os.path.dirname(log_dir) + '/' + modified.strftime("%Y-%m-%d_%H-%M-%S")
         os.rename(log_dir, new_log_dir)
@@ -176,7 +177,7 @@ if __name__ == "__main__":
 
     os.makedirs(log_dir, exist_ok=True)
 
-    wandb.init(project="optuna-test", name='trial_0073')
+    wandb.init(project="optuna-distillation", name='trial_id-kd-700')
     wandb.config.update({
         'hyperparams' : hyperparams,
         'model_config' : model_config,
