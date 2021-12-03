@@ -420,6 +420,12 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
         [model_config["input_channel"]] + model_config["INPUT_SIZE"],
         device,
     )
+    params_nums = count_model_params(model)
+
+    # Pruning Trial by inference time
+    if mean_time >= 1.4:
+        return 0.0, params_nums, mean_time
+
     model_info(model, verbose=True)
     train_loader, val_loader, test_loader = create_dataloader(data_config)
 
@@ -456,7 +462,6 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     )
     trainer.train(train_loader, hyperparams["EPOCHS"], val_dataloader=val_loader)
     loss, f1_score, acc_percent = trainer.test(model, test_dataloader=val_loader)
-    params_nums = count_model_params(model)
 
     model_info(model, verbose=True)
     print('='*50)
