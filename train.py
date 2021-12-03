@@ -138,7 +138,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train model.")
     parser.add_argument(
         "--trial_dir",
-        default="exp/latest/trial_id-0073",
+        default="exp_train/latest",
         type=str,
         help="config dir",
     )
