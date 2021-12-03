@@ -517,16 +517,18 @@ def tune(gpu_id, storage: str = None):
 
     log_dir = os.path.join("/opt/ml/code", os.path.join("exp", 'latest'))
     # log_dir = os.environ.get("SM_MODEL_DIR", os.path.join("exp", 'latest')) 
-    log_dir_start = log_dir + '/best.pt'
 
-    if os.path.exists(log_dir_start): 
+    if os.path.exists(log_dir): 
         modified = datetime.fromtimestamp(os.path.getmtime(log_dir + '/best.pt'))
         new_log_dir = os.path.dirname(log_dir) + '/' + modified.strftime("%Y-%m-%d_%H-%M-%S")
         os.rename(log_dir, new_log_dir)
 
     os.makedirs(log_dir, exist_ok=True)
 
-    wandb_kwargs = {"project": "optuna-loss-ce", 'name': 'crossentropy-weight'}
+    wandb_kwargs = {
+        "project": "optuna-search",
+        'name': 'crossentropy-weight'
+        }
     wandbc = WeightsAndBiasesCallback(wandb_kwargs=wandb_kwargs, metric_name=['value_0', 'value_1', 'value_2'])
 
     study = optuna.create_study(
