@@ -21,6 +21,18 @@ from optuna.pruners import HyperbandPruner
 from subprocess import _args_from_interpreter_flags
 import argparse
 from optuna.integration.wandb import WeightsAndBiasesCallback # optuna>=v2.9.0
+import random
+import numpy as np
+
+def set_seed(seed: int = 42):
+    random.seed(seed) # random
+    np.random.seed(seed) # numpy
+    os.environ["PYTHONHASHSEED"] = str(seed) # os
+    # pytorch
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) 
+    torch.backends.cudnn.deterministic = True 
+    torch.backends.cudnn.benchmark = False 
 
 DATA_PATH = "/opt/ml/data"  # type your data path here that contains test, train and val directories
 def search_hyperparam(trial: optuna.trial.Trial) -> Dict[str, Any]:
@@ -487,6 +499,7 @@ def get_best_trial_with_condition(optuna_study: optuna.study.Study) -> Dict[str,
 
 
 def tune(gpu_id, storage: str = None):
+    set_seed(seed=42)
     if not torch.cuda.is_available():
         device = torch.device("cpu")
     elif 0 <= gpu_id < torch.cuda.device_count():
