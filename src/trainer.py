@@ -20,7 +20,7 @@ from torch.utils.data.sampler import SequentialSampler, SubsetRandomSampler
 from tqdm import tqdm
 import wandb
 
-from src.utils.torch_utils import EarlyStopping
+from src.utils.torch_utils import EarlyStopping, save_model
 
 
 def _get_n_data_from_dataloader(dataloader: DataLoader) -> int:
@@ -210,6 +210,7 @@ class TorchTrainer:
             best_test_acc = test_acc
             best_test_f1 = test_f1
             print(f"Model saved. Current best test f1: {best_test_f1:.3f}")
+            save_model(self.model, self.model_path, self.optimizer, self.scheduler)
             self.early_stopping(val_loss, self.model, self.optimizer, self.scheduler)
             if self.early_stopping.early_stop:
                 print("Early Stopping")
