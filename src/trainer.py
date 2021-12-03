@@ -181,15 +181,16 @@ class TorchTrainer:
 
                 example_ct += len(labels)
                 batch_ct += 1
-                if wandb_log and ((batch_ct + 1) % 100) == 0:
-                    wandb.log(
-                        {
-                            "epoch": epoch,
-                            "loss" : running_loss / (batch + 1),
-                            "acc" : correct / total,
-                            "F1(macro)" : f1_score(y_true=gt, y_pred=preds, labels=label_list, average='macro', zero_division=0)
-                        }, step=example_ct)
-                    # print(f"Loss after " + str(example_ct).zfill(5) + f" examples: {loss:.3f}")
+
+            if wandb_log:
+                wandb.log(
+                    {
+                        "epoch": epoch,
+                        "loss" : running_loss / (batch + 1),
+                        "acc" : correct / total,
+                        "F1(macro)" : f1_score(y_true=gt, y_pred=preds, labels=label_list, average='macro', zero_division=0)
+                    }, step=example_ct)
+                # print(f"Loss after " + str(example_ct).zfill(5) + f" examples: {loss:.3f}")
             
             pbar.close()
 
