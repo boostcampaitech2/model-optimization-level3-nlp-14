@@ -162,7 +162,7 @@ def backbone_train(
     fp16: bool,
     device: torch.device,
 ) -> Tuple[float, float, float]:
-    """Train."""
+    """Train for pretrained model"""
     
     set_seed(seed=42)
     

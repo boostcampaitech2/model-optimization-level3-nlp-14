@@ -272,7 +272,7 @@ class TorchTrainer:
 
 
 class KD_TorchTrainer:
-    """Pytorch Trainer."""
+    """Pytorch Trainer for applying Knowledge Distillation"""
 
     def __init__(
         self,

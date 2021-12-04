@@ -105,6 +105,7 @@ def get_weights(data_path):
 
 
 class DistillationLoss_Weight:
+    """Knowledge Distillation loss -Hinton"""
 
     def __init__(self, weight):
         self.weight = weight

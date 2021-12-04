@@ -128,6 +128,8 @@ class ModelParser:
 
 
 class Efficientnet_b0(nn.Module):
+    """efficientnet_b0 model class from timm"""
+
     def __init__(self, num_classes: int = 6):
         super().__init__()
         self.pretrained = timm.create_model('efficientnet_b0', pretrained=True)
