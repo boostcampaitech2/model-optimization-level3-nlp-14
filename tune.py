@@ -358,7 +358,12 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device, backbone) -> Tupl
     """
     hyperparams = search_hyperparam(trial)
 
-    if backbone == False:
+    if backbone:
+        model = Efficientnet_b0()
+        model_path = os.path.join(log_dir, "best.pt") # result model will be saved in this path
+        print(f"Model save path: {model_path}")
+        model.to(device)
+    else:
         model_config: Dict[str, Any] = {}
         model_config["input_channel"] = 3
         img_size = hyperparams["IMG_SIZE"]
@@ -375,11 +380,6 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device, backbone) -> Tupl
         print(f"Model save path: {model_path}")
         model.to(device)    
         model.model.to(device)
-    else:
-        model = Efficientnet_b0()
-        model_path = os.path.join(log_dir, "best.pt") # result model will be saved in this path
-        print(f"Model save path: {model_path}")
-        model.to(device)
 
     # check ./data_configs/data.yaml for config information
     data_config: Dict[str, Any] = {}
@@ -401,17 +401,17 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device, backbone) -> Tupl
     data_config["LOSS"] = 'CrossEntropy_Weight'
 
     trial.set_user_attr('hyperparams',  hyperparams)
-    if backbone==False:
+    if backbone:
+        mean_time = check_runtime(
+        model,
+        [3]+[224, 224],
+        device,
+    )
+    else:
         trial.set_user_attr('model_config', model_config)
         mean_time = check_runtime(
         model.model,
         [model_config["input_channel"]] + model_config["INPUT_SIZE"],
-        device,
-    )
-    else:
-        mean_time = check_runtime(
-        model,
-        [3]+[224, 224],
         device,
     )
     trial.set_user_attr('data_config', data_config)
