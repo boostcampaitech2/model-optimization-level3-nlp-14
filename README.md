@@ -24,11 +24,11 @@ _"Korean is all YOU Need for dialoGuE"_
 #### 🔅 Contribution  
 
 - [`진명훈`](https://github.com/jinmang2) &nbsp; NAS • Analyzing hyperparameter search results
-- [`김대웅`](https://github.com/KimDaeUng) &nbsp; Curriculum Learning • DPR • Question Embedding Vis • KoEDA • Context Summary • Post processing • Ensemble(hard voting)
+- [`김대웅`](https://github.com/KimDaeUng) &nbsp; NAS • Analyzing hyperparameter search results • Wandb
 - [`김태욱`](https://github.com/taeukkkim) &nbsp; NAS • Analyzing hyperparameter search results
 - [`허진규`](https://github.com/JeangyuHeo) &nbsp; NAS • Analyzing hyperparameter search results
 - [`이하람`](https://github.com/hrxorxm) &nbsp; NAS • Analyzing hyperparameter search results
-- [`김채은`](https://github.com/Amber-Chaeeunk) &nbsp; NAS • Knowledge distillation • Loss function • Pretrained model
+- [`김채은`](https://github.com/Amber-Chaeeunk) &nbsp; NAS • Knowledge distillation • Loss function • Pretrained model tuning & training
 - [`유영재`](https://github.com/uyeongjae) &nbsp; NAS • Analyzing hyperparameter search results
 
 ## 2. Project Outline
@@ -120,4 +120,5 @@ Our basic structure is based on [Kindle](https://github.com/JeiKeiLim/kindle)(by
 ### Paper
 - [Distilling the Knowledge in a Neural Network
 ](https://arxiv.org/abs/1503.02531)
-
+- [Dimensionality Reduction by Learning an Invariant Mapping
+](http://yann.lecun.com/exdb/publis/pdf/hadsell-chopra-lecun-06.pdf)
