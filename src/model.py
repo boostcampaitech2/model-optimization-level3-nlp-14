@@ -40,7 +40,7 @@ class Model(nn.Module):
         """Forward onetime."""
 
         return self.model(x)
-
+        
 
 class ModelParser:
     """Generate PyTorch model from the model yaml file."""
