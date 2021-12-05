@@ -89,7 +89,7 @@ def get_dataset(
         train_dataset = ImageFolder(root=train_path, transform=transform_train)
 
         if subset_sampling_ratio > 0:
-            train_dataset = subset_sampler(train_dataset)
+            train_dataset = subset_sampler(train_dataset, subset_sampling_ratio)
 
         val_dataset = ImageFolder(root=val_path, transform=transform_test)
         test_dataset = ImageFolder(root=test_path, transform=transform_test)

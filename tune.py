@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from src.dataloader import create_dataloader
-from src.loss import CustomCriterion
+from src.loss import CustomCriterion, get_weights, get_loss
 from src.model import Model
 from src.utils.torch_utils import model_info, check_runtime
 from src.utils.common import get_label_counts
@@ -21,6 +21,18 @@ from optuna.pruners import HyperbandPruner
 from subprocess import _args_from_interpreter_flags
 import argparse
 from optuna.integration.wandb import WeightsAndBiasesCallback # optuna>=v2.9.0
+import random
+import numpy as np
+
+def set_seed(seed: int = 42):
+    random.seed(seed) # random
+    np.random.seed(seed) # numpy
+    os.environ["PYTHONHASHSEED"] = str(seed) # os
+    # pytorch
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed) 
+    torch.backends.cudnn.deterministic = True 
+    torch.backends.cudnn.benchmark = False 
 
 DATA_PATH = "/opt/ml/data"  # type your data path here that contains test, train and val directories
 def search_hyperparam(trial: optuna.trial.Trial) -> Dict[str, Any]:
@@ -395,6 +407,7 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     data_config["INIT_LR"] = hyperparams["INIT_LR"]
     data_config["FP16"] = True
     data_config["SUBSET_SAMPLING_RATIO"] = 0.5 # 0 means full data
+    data_config["LOSS"] = 'CrossEntropy_Weight'
 
     trial.set_user_attr('hyperparams',  hyperparams)
     trial.set_user_attr('model_config', model_config)
@@ -407,15 +420,18 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
         [model_config["input_channel"]] + model_config["INPUT_SIZE"],
         device,
     )
+    params_nums = count_model_params(model)
+
+    # Pruning Trial by inference time
+    if mean_time >= 1.4:
+        return 0.0, params_nums, mean_time
+
     model_info(model, verbose=True)
     train_loader, val_loader, test_loader = create_dataloader(data_config)
 
-    criterion = CustomCriterion(
-        samples_per_cls=get_label_counts(data_config["DATA_PATH"])
-        if data_config["DATASET"] == "TACO"
-        else None,
-        device=device,
-    )
+    weights = get_weights(data_config["DATA_PATH"])
+    criterion = get_loss(data_config["LOSS"], data_config["FP16"], weight=weights, device=device)
+
     if hyperparams["OPTIMIZER"] == "SGD":
         optimizer = torch.optim.SGD(model.parameters(), lr=hyperparams["INIT_LR"])
     else:
@@ -446,7 +462,6 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     )
     trainer.train(train_loader, hyperparams["EPOCHS"], val_dataloader=val_loader)
     loss, f1_score, acc_percent = trainer.test(model, test_dataloader=val_loader)
-    params_nums = count_model_params(model)
 
     model_info(model, verbose=True)
     print('='*50)
@@ -489,6 +504,7 @@ def get_best_trial_with_condition(optuna_study: optuna.study.Study) -> Dict[str,
 
 
 def tune(gpu_id, storage: str = None):
+    set_seed(seed=42)
     if not torch.cuda.is_available():
         device = torch.device("cpu")
     elif 0 <= gpu_id < torch.cuda.device_count():
@@ -509,7 +525,10 @@ def tune(gpu_id, storage: str = None):
 
     os.makedirs(log_dir, exist_ok=True)
 
-    wandb_kwargs = {"project": "optuna-test-du", 'name': 'test'}
+    wandb_kwargs = {
+        "project": "optuna-search",
+        'name': 'crossentropy-weight'
+        }
     wandbc = WeightsAndBiasesCallback(wandb_kwargs=wandb_kwargs, metric_name=['value_0', 'value_1', 'value_2'])
 
     study = optuna.create_study(
