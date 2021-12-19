@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.optim as optim
 from src.dataloader import create_dataloader
 from src.loss import CustomCriterion, get_weights, get_loss
-from src.model import Model
+from src.model import Model, Efficientnet_b0
 from src.utils.torch_utils import model_info, check_runtime
 from src.utils.common import get_label_counts
 from src.trainer import TorchTrainer, count_model_params
@@ -21,18 +21,6 @@ from optuna.pruners import HyperbandPruner
 from subprocess import _args_from_interpreter_flags
 import argparse
 from optuna.integration.wandb import WeightsAndBiasesCallback # optuna>=v2.9.0
-import random
-import numpy as np
-
-def set_seed(seed: int = 42):
-    random.seed(seed) # random
-    np.random.seed(seed) # numpy
-    os.environ["PYTHONHASHSEED"] = str(seed) # os
-    # pytorch
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed) 
-    torch.backends.cudnn.deterministic = True 
-    torch.backends.cudnn.benchmark = False 
 
 DATA_PATH = "/opt/ml/data"  # type your data path here that contains test, train and val directories
 def search_hyperparam(trial: optuna.trial.Trial) -> Dict[str, Any]:
@@ -360,7 +348,7 @@ def search_model(trial: optuna.trial.Trial) -> List[Any]:
     return model, module_info
 
 
-def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, int, float]:
+def objective(trial: optuna.trial.Trial, log_dir: str, device, backbone) -> Tuple[float, int, float]:
     """Optuna objective.
     Args:
         trial
@@ -370,25 +358,28 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     """
     hyperparams = search_hyperparam(trial)
 
-    model_config: Dict[str, Any] = {}
-    model_config["input_channel"] = 3
-    img_size = hyperparams["IMG_SIZE"]
-    model_config["INPUT_SIZE"] = [img_size, img_size]
-    model_config["depth_multiple"] = trial.suggest_categorical(
-        "depth_multiple", [0.25, 0.5, 0.75, 1.0]
-    )
-    model_config["width_multiple"] = trial.suggest_categorical(
-        "width_multiple", [0.25, 0.5, 0.75, 1.0]
-    )
-    model_config["backbone"], module_info = search_model(trial)
-
-    
-
-    model = Model(model_config, verbose=True)
-    model_path = os.path.join(log_dir, "best.pt") # result model will be saved in this path
-    print(f"Model save path: {model_path}")
-    model.to(device)
-    model.model.to(device)
+    if backbone:
+        model = Efficientnet_b0()
+        model_path = os.path.join(log_dir, "best.pt") # result model will be saved in this path
+        print(f"Model save path: {model_path}")
+        model.to(device)
+    else:
+        model_config: Dict[str, Any] = {}
+        model_config["input_channel"] = 3
+        img_size = hyperparams["IMG_SIZE"]
+        model_config["INPUT_SIZE"] = [img_size, img_size]
+        model_config["depth_multiple"] = trial.suggest_categorical(
+            "depth_multiple", [0.25, 0.5, 0.75, 1.0]
+        )
+        model_config["width_multiple"] = trial.suggest_categorical(
+            "width_multiple", [0.25, 0.5, 0.75, 1.0]
+        )
+        model_config["backbone"], module_info = search_model(trial)
+        model = Model(model_config, verbose=True)
+        model_path = os.path.join(log_dir, "best.pt") # result model will be saved in this path
+        print(f"Model save path: {model_path}")
+        model.to(device)    
+        model.model.to(device)
 
     # check ./data_configs/data.yaml for config information
     data_config: Dict[str, Any] = {}
@@ -410,28 +401,29 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     data_config["LOSS"] = 'CrossEntropy_Weight'
 
     trial.set_user_attr('hyperparams',  hyperparams)
-    trial.set_user_attr('model_config', model_config)
-    trial.set_user_attr('data_config', data_config)
-    for key, value in trial.params.items():
-        print(f"    {key}:{value}")
-
-    mean_time = check_runtime(
+    if backbone:
+        mean_time = check_runtime(
+        model,
+        [3]+[224, 224],
+        device,
+    )
+    else:
+        trial.set_user_attr('model_config', model_config)
+        mean_time = check_runtime(
         model.model,
         [model_config["input_channel"]] + model_config["INPUT_SIZE"],
         device,
     )
-    params_nums = count_model_params(model)
-
-    # Pruning Trial by inference time
-    if mean_time >= 1.4:
-        return 0.0, params_nums, mean_time
+    trial.set_user_attr('data_config', data_config)
+    for key, value in trial.params.items():
+        print(f"    {key}:{value}")
 
     model_info(model, verbose=True)
     train_loader, val_loader, test_loader = create_dataloader(data_config)
-
+    
     weights = get_weights(data_config["DATA_PATH"])
     criterion = get_loss(data_config["LOSS"], data_config["FP16"], weight=weights, device=device)
-
+    
     if hyperparams["OPTIMIZER"] == "SGD":
         optimizer = torch.optim.SGD(model.parameters(), lr=hyperparams["INIT_LR"])
     else:
@@ -462,6 +454,7 @@ def objective(trial: optuna.trial.Trial, log_dir: str, device) -> Tuple[float, i
     )
     trainer.train(train_loader, hyperparams["EPOCHS"], val_dataloader=val_loader)
     loss, f1_score, acc_percent = trainer.test(model, test_dataloader=val_loader)
+    params_nums = count_model_params(model)
 
     model_info(model, verbose=True)
     print('='*50)
@@ -503,8 +496,7 @@ def get_best_trial_with_condition(optuna_study: optuna.study.Study) -> Dict[str,
     return best_trial_
 
 
-def tune(gpu_id, storage: str = None):
-    set_seed(seed=42)
+def tune(gpu_id, backbone, storage: str = None):
     if not torch.cuda.is_available():
         device = torch.device("cpu")
     elif 0 <= gpu_id < torch.cuda.device_count():
@@ -517,18 +509,16 @@ def tune(gpu_id, storage: str = None):
 
     log_dir = os.path.join("/opt/ml/code", os.path.join("exp", 'latest'))
     # log_dir = os.environ.get("SM_MODEL_DIR", os.path.join("exp", 'latest')) 
+    log_dir_start = log_dir + '/best.pt'
 
-    if os.path.exists(log_dir): 
+    if os.path.exists(log_dir_start): 
         modified = datetime.fromtimestamp(os.path.getmtime(log_dir + '/best.pt'))
         new_log_dir = os.path.dirname(log_dir) + '/' + modified.strftime("%Y-%m-%d_%H-%M-%S")
         os.rename(log_dir, new_log_dir)
 
     os.makedirs(log_dir, exist_ok=True)
 
-    wandb_kwargs = {
-        "project": "optuna-search",
-        'name': 'crossentropy-weight'
-        }
+    wandb_kwargs = {"project": "optuna-wrapup", 'name': 'test'}
     wandbc = WeightsAndBiasesCallback(wandb_kwargs=wandb_kwargs, metric_name=['value_0', 'value_1', 'value_2'])
 
     study = optuna.create_study(
@@ -538,7 +528,7 @@ def tune(gpu_id, storage: str = None):
         storage=rdb_storage,
         load_if_exists=True,
     )
-    study.optimize(lambda trial: objective(trial, log_dir, device), n_trials=100, callbacks=[wandbc], n_jobs=1)
+    study.optimize(lambda trial: objective(trial, log_dir, device, backbone), n_trials=100, callbacks=[wandbc], n_jobs=1)
 
     pruned_trials = [
         t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED
@@ -568,8 +558,9 @@ def tune(gpu_id, storage: str = None):
             """)
         with open(os.path.join(save_path, "hyperparams.yml"), "w") as f:
             yaml.dump(tr.user_attrs['hyperparams'], f, default_flow_style=None, sort_keys=False)
-        with open(os.path.join(save_path, "model.yml"), "w") as f:
-            yaml.dump(tr.user_attrs['model_config'], f, default_flow_style=None, sort_keys=False)
+        if backbone==False:
+            with open(os.path.join(save_path, "model.yml"), "w") as f:
+                yaml.dump(tr.user_attrs['model_config'], f, default_flow_style=None, sort_keys=False)
         with open(os.path.join(save_path, "data.yml"), "w") as f:
             yaml.dump(tr.user_attrs['data_config'], f, default_flow_style=None, sort_keys=False)
         
@@ -588,5 +579,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Optuna tuner.")
     parser.add_argument("--gpu", default=0, type=int, help="GPU id to use")
     parser.add_argument("--storage", default="sqlite:///exp.db", type=str, help="Optuna database storage path.")
+    parser.add_argument("--backbone", default=False, type=bool, help="Whether to use pretrained model or not" )
     args = parser.parse_args()
-    tune(args.gpu, storage=args.storage if args.storage != "" else None)
+    tune(args.gpu, args.backbone, storage=args.storage if args.storage != "" else None)

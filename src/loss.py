@@ -104,6 +104,23 @@ def get_weights(data_path):
     return weights
 
 
+class DistillationLoss_Weight:
+    """Knowledge Distillation loss -Hinton"""
+
+    def __init__(self, weight):
+        self.weight = weight
+
+    def __call__(self, logits, labels, teacher_logits):
+        """Call criterion."""
+        alpha = 0.3
+        T = 1
+        student_loss = F.cross_entropy(input=logits, target=labels, weight=self.weight)
+        distillation_loss = nn.KLDivLoss(reduction='batchmean')(F.log_softmax(logits/T, dim=1), F.softmax(teacher_logits/T, dim=1)) * (T * T)
+        total_loss =  (1. - alpha)*student_loss + alpha*distillation_loss
+ 
+        return total_loss
+
+
 def get_loss(loss_fn, fp16, weight, device):
     if loss_fn == 'CrossEntropy':
         loss_fn = nn.CrossEntropyLoss()
@@ -113,4 +130,6 @@ def get_loss(loss_fn, fp16, weight, device):
         loss_fn = FocalLoss(weight=torch.tensor(weight).to(device, dtype=torch.half if fp16 else torch.float))
     elif loss_fn == 'ContrastiveLoss':
         loss_fn = ContrastiveLoss()
+    elif loss_fn == 'DistillationLoss_Weight':
+        loss_fn = DistillationLoss_Weight(weight=torch.tensor(weight).to(device, dtype=torch.half if fp16 else torch.float))
     return loss_fn
